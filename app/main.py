@@ -36,7 +36,9 @@ async def lifespan(app: FastAPI):
     retriever = Retriever(embedder, s.cache_dir / "embeddings.npz")
     retriever.build(DOCUMENTS)
     client = httpx.AsyncClient(
-        headers={"User-Agent": "Contexta/2.0 (+https://github.com/Prit00001/Contexta)"}, follow_redirects=True
+        headers={"User-Agent": "Contexta/2.0 (+https://github.com/Prit00001/Contexta)"},
+        follow_redirects=True,
+        transport=getattr(app.state, "http_transport", None),  # injected by tests; None = real network
     )
     generator = Generator(s.providers, client, s.llm_timeout)
     arxiv = ArxivClient(client, s.arxiv_max_results, s.arxiv_cache_ttl)
@@ -50,12 +52,17 @@ async def lifespan(app: FastAPI):
         try:
             app.state.db_pool = db.make_pool(s.database_url)
         except Exception as exc:  # noqa: BLE001 - the public research API must not depend on the DB
-            log.error("Database unreachable at startup (%s); workspace features disabled", type(exc).__name__,
-                      extra={"event": "startup.db", "status": "error", "category": "internal"})
+            log.error(
+                "Database unreachable at startup (%s); workspace features disabled",
+                type(exc).__name__,
+                extra={"event": "startup.db", "status": "error", "category": "internal"},
+            )
     app.state.workspace_limiter = make_limiter(s.redis_url, s.workspace_rate_limit_per_min)
     log.info(
         "Ready: %d docs, embeddings=%s%s, LLM providers=%s, db=%s",
-        retriever.size, embedder.backend, " (FALLBACK)" if embedder.degraded else "",
+        retriever.size,
+        embedder.backend,
+        " (FALLBACK)" if embedder.degraded else "",
         generator.provider_names or "none (extractive mode)",
         "connected" if app.state.db_pool else ("UNREACHABLE" if s.database_url else "not configured"),
         extra={"event": "startup", "status": "degraded" if embedder.degraded else "ok"},
@@ -66,7 +73,9 @@ async def lifespan(app: FastAPI):
         app.state.db_pool.closeall()
 
 
-def create_app() -> FastAPI:
+def create_app(http_transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
+    """App factory. ``http_transport`` replaces the network for every outbound call (arXiv, LLM
+    providers) - integration tests pass an ``httpx.MockTransport``; production passes nothing."""
     app = FastAPI(
         title="Contexta 2.0",
         version="2.0.0",
@@ -85,6 +94,7 @@ def create_app() -> FastAPI:
         expose_headers=["X-Request-ID"],
     )
     app.add_middleware(RequestContextMiddleware)  # outermost: sees every response, incl. CORS and 500s
+    app.state.http_transport = http_transport
     app.include_router(router)
     app.include_router(admin_router)
     app.include_router(workspace_router)

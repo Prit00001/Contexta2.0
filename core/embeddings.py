@@ -5,16 +5,23 @@ needs ~150 MB RAM instead of the ~1 GB that torch + sentence-transformers wants.
 what makes the free 512 MB tier viable. A deterministic hashing backend exists for tests
 and as an emergency fallback if the model cannot be loaded.
 """
+
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import logging
+import os
 import threading
 
 import numpy as np
 
 from core.text import tokenize
+
+# ONNX Runtime (used by fastembed) otherwise sends usage telemetry to mobile.events.data.microsoft.com
+# - observed during model loading in Phase 1 testing. Must be set before onnxruntime is imported;
+# operators can opt back in with ORT_DISABLE_TELEMETRY=0.
+os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
 
 log = logging.getLogger("contexta.embeddings")
 HASH_DIM = 384

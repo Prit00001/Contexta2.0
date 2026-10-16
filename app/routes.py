@@ -96,12 +96,16 @@ ERROR_RESPONSES = {
     429: {
         "model": ErrorResponse,
         "description": "Rate limit exceeded; retry after the `Retry-After` header (seconds)",
-        "content": {"application/json": {"example": {"detail": "Too many requests. Please wait a minute and try again."}}},
+        "content": {
+            "application/json": {"example": {"detail": "Too many requests. Please wait a minute and try again."}}
+        },
     },
     500: {
         "model": ErrorResponse,
         "description": "Unexpected server error; quote the request_id when reporting it",
-        "content": {"application/json": {"example": {"detail": "Internal server error", "request_id": "3f9c1a7e2b4d6f80"}}},
+        "content": {
+            "application/json": {"example": {"detail": "Internal server error", "request_id": "3f9c1a7e2b4d6f80"}}
+        },
     },
     503: {"model": ErrorResponse, "description": "Retrieval temporarily unavailable"},
 }
@@ -146,9 +150,7 @@ async def ask_pdf(
     if not data:
         raise HTTPException(400, "The uploaded file is empty.")
     if len(data) > max_bytes:
-        raise HTTPException(
-            413, f"PDF too large. Max size is {max_bytes // (1024 * 1024)} MB."
-        )
+        raise HTTPException(413, f"PDF too large. Max size is {max_bytes // (1024 * 1024)} MB.")
     if not data.startswith(b"%PDF"):
         raise HTTPException(415, "That file isn't a PDF.")
 
@@ -156,9 +158,7 @@ async def ask_pdf(
     try:
         pages = await run_in_threadpool(extract_pages, data)
     except Exception:  # noqa: BLE001 - pypdf raises many types on bad input
-        raise HTTPException(
-            422, "Couldn't read this PDF. It may be password-protected or corrupted."
-        )
+        raise HTTPException(422, "Couldn't read this PDF. It may be password-protected or corrupted.")
 
     chunks = await run_in_threadpool(chunk, pages)
     if not chunks:

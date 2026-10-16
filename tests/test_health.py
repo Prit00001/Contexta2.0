@@ -73,3 +73,15 @@ def test_forwarded_for_ignored_when_proxy_headers_untrusted(monkeypatch):
             assert c.post("/ask", json=body, headers={"X-Forwarded-For": "9.9.9.9"}).status_code == 429
     finally:
         get_settings.cache_clear()
+
+
+def test_onnx_runtime_telemetry_disabled_by_default():
+    """Fresh interpreter without the variable: importing the embedder module must set it to 1."""
+    import os
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if k != "ORT_DISABLE_TELEMETRY"}
+    code = "import core.embeddings, os; print(os.environ['ORT_DISABLE_TELEMETRY'])"
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "1"
