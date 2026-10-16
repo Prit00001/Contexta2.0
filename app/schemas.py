@@ -84,6 +84,52 @@ class AskResponse(BaseModel):
     workflow: list[WorkflowStep] = []
 
 
+ASK_RESPONSE_EXAMPLE = {
+    "question": "How does retrieval-augmented generation reduce hallucination?",
+    "answer": "RAG conditions the generator on passages fetched from an external index, so answers are grounded "
+    "in evidence rather than only in model parameters [1]. Dense retrievers such as DPR supply those passages [2].",
+    "sources": [
+        {"id": "doc_004", "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP", "source": "local",
+         "url": "https://arxiv.org/abs/2005.11401", "score": 0.71, "snippet": "Retrieval-augmented generation (RAG) "
+         "combines a parametric seq2seq generator with a non-parametric memory...", "authors": [], "published": "",
+         "page": None, "marker": 1, "document_id": "doc_004", "chunk_id": "doc_004#0"},
+        {"id": "doc_005", "title": "Dense Passage Retrieval for Open-Domain QA", "source": "local",
+         "url": "https://arxiv.org/abs/2004.04906", "score": 0.52, "snippet": "Dense Passage Retrieval (DPR) trains "
+         "two BERT encoders...", "authors": [], "published": "", "page": None, "marker": 2, "document_id": "doc_005",
+         "chunk_id": "doc_005#0"},
+    ],
+    "total_sources": 2,
+    "model_used": "openai/gpt-oss-20b",
+    "provider": "groq",
+    "llm_used": True,
+    "cached": False,
+    "warnings": [],
+    "diagnostics": [],
+    "timings_ms": {"local": 4, "arxiv": 0, "generate": 1180, "total": 1190},
+    "request_id": "3f9c1a7e2b4d6f80",
+    "outcome": "answered",
+    "citations": [
+        {"marker": 1, "source_id": "doc_004", "document_id": "doc_004", "chunk_id": "doc_004#0",
+         "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP", "url": "https://arxiv.org/abs/2005.11401"},
+        {"marker": 2, "source_id": "doc_005", "document_id": "doc_005", "chunk_id": "doc_005#0",
+         "title": "Dense Passage Retrieval for Open-Domain QA", "url": "https://arxiv.org/abs/2004.04906"},
+    ],
+    "claims": [
+        {"text": "RAG conditions the generator on passages fetched from an external index, so answers are grounded "
+         "in evidence rather than only in model parameters.", "markers": [1], "status": "cited"},
+        {"text": "Dense retrievers such as DPR supply those passages.", "markers": [2], "status": "cited"},
+    ],
+    "citation_check": {"verification": "marker_only", "valid_markers": 2, "removed_markers": [], "uncited_claims": 0},
+    "workflow": [
+        {"stage": "validate_request", "status": "ok", "duration_ms": 0},
+        {"stage": "retrieve", "status": "ok", "duration_ms": 6},
+        {"stage": "generate", "status": "ok", "duration_ms": 1175},
+        {"stage": "validate_answer", "status": "ok", "duration_ms": 1},
+        {"stage": "finalize", "status": "answered", "duration_ms": 0},
+    ],
+}  # fmt: skip
+
+
 class ErrorResponse(BaseModel):
     detail: str
     request_id: str = ""

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections import defaultdict, deque
 
@@ -8,11 +9,21 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
-from app.schemas import AskRequest, AskResponse, HealthResponse, ReadyCheck, ReadyResponse
+from app.observability import question_fingerprint
+from app.schemas import (
+    ASK_RESPONSE_EXAMPLE,
+    AskRequest,
+    AskResponse,
+    ErrorResponse,
+    HealthResponse,
+    ReadyCheck,
+    ReadyResponse,
+)
 from core.pdf import chunk, extract_pages
 from core.storage import safe_filename
 
 router = APIRouter()
+log = logging.getLogger("contexta.api")
 
 
 class RateLimiter:
@@ -59,6 +70,7 @@ def _request_id(request: Request) -> str:
 
 def _check_rate_limit(request: Request) -> None:
     if not request.app.state.limiter.allow(_client_ip(request)):
+        log.info("rate limited", extra={"event": "ratelimit", "category": "rate_limited"})
         raise HTTPException(
             429,
             "Too many requests. Please wait a minute and try again.",
@@ -66,14 +78,60 @@ def _check_rate_limit(request: Request) -> None:
         )
 
 
-@router.post("/ask", response_model=AskResponse)
+def _log_result(kind: str, question: str, result: dict, **fields) -> None:
+    category = {"insufficient_evidence": "insufficient_evidence", "extractive_fallback": "llm_unavailable"}.get(
+        result["outcome"]
+    )
+    log.info(
+        "%s answered: outcome=%s sources=%d", kind, result["outcome"], result["total_sources"],
+        extra={"event": f"{kind}.result", "outcome": result["outcome"], "n_sources": result["total_sources"],
+               "llm_used": result["llm_used"], "provider": result["provider"], "cached": result["cached"],
+               "duration_ms": result.get("timings_ms", {}).get("total"), "category": category,
+               **question_fingerprint(question), **fields},
+    )  # fmt: skip
+
+
+ERROR_RESPONSES = {
+    422: {"description": "Validation error (FastAPI default body)"},
+    429: {
+        "model": ErrorResponse,
+        "description": "Rate limit exceeded; retry after the `Retry-After` header (seconds)",
+        "content": {"application/json": {"example": {"detail": "Too many requests. Please wait a minute and try again."}}},
+    },
+    500: {
+        "model": ErrorResponse,
+        "description": "Unexpected server error; quote the request_id when reporting it",
+        "content": {"application/json": {"example": {"detail": "Internal server error", "request_id": "3f9c1a7e2b4d6f80"}}},
+    },
+    503: {"model": ErrorResponse, "description": "Retrieval temporarily unavailable"},
+}
+
+
+@router.post(
+    "/ask",
+    response_model=AskResponse,
+    summary="Answer a research question from the paper library and arXiv",
+    responses={200: {"content": {"application/json": {"example": ASK_RESPONSE_EXAMPLE}}}, **ERROR_RESPONSES},
+)
 async def ask(body: AskRequest, request: Request):
+    """Runs the LangGraph research workflow: validate -> retrieve (FAISS library + optional live arXiv)
+    -> generate (LLM provider chain) -> validate citations -> respond. Falls back to an extractive
+    answer when no LLM succeeds, and says so when nothing relevant is found (`outcome`)."""
     _check_rate_limit(request)
     result = await request.app.state.service.ask(body.question, body.top_k, body.use_arxiv)
+    _log_result("ask", body.question, result, top_k=body.top_k, use_arxiv=body.use_arxiv)
     return {**result, "request_id": _request_id(request)}
 
 
-@router.post("/ask-pdf", response_model=AskResponse)
+@router.post(
+    "/ask-pdf",
+    response_model=AskResponse,
+    summary="Answer a question about an uploaded PDF",
+    responses={
+        400: {"description": "Empty file"}, 413: {"description": "PDF larger than MAX_PDF_MB"},
+        415: {"description": "Not a PDF"}, **ERROR_RESPONSES,
+    },
+)  # fmt: skip
 async def ask_pdf(
     request: Request,
     question: str = Form(..., min_length=3, max_length=1000),
@@ -115,6 +173,7 @@ async def ask_pdf(
         top_k=top_k,
         filename=safe_filename(file.filename or "uploaded.pdf"),
     )
+    _log_result("ask_pdf", question, result, top_k=top_k)
     return {**result, "request_id": _request_id(request)}
 
 
@@ -179,8 +238,10 @@ async def ready(request: Request):
     else:
         checks["llm"] = ReadyCheck(ok=True, detail="available: " + ", ".join(available))
     checks["arxiv"] = ReadyCheck(ok=True, detail="enabled" if st.settings.arxiv_enabled else "disabled")
-    if st.db_pool is None:
+    if not getattr(st, "db_configured", st.db_pool is not None):
         checks["database"] = ReadyCheck(ok=True, detail="not configured (workspace features off)")
+    elif st.db_pool is None:
+        checks["database"] = ReadyCheck(ok=False, detail="unreachable at startup (workspace features off)")
     else:
         try:
             await asyncio.wait_for(asyncio.to_thread(_db_ping, st.db_pool), timeout=3.0)
