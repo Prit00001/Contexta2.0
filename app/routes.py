@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.schemas import AskRequest, AskResponse, HealthResponse, ReadyCheck, ReadyResponse
 from core.pdf import chunk, extract_pages
+from core.storage import safe_filename
 
 router = APIRouter()
 
@@ -52,6 +53,10 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _request_id(request: Request) -> str:
+    return getattr(request.state, "request_id", "")
+
+
 def _check_rate_limit(request: Request) -> None:
     if not request.app.state.limiter.allow(_client_ip(request)):
         raise HTTPException(
@@ -64,9 +69,8 @@ def _check_rate_limit(request: Request) -> None:
 @router.post("/ask", response_model=AskResponse)
 async def ask(body: AskRequest, request: Request):
     _check_rate_limit(request)
-    return await request.app.state.service.ask(
-        body.question, body.top_k, body.use_arxiv
-    )
+    result = await request.app.state.service.ask(body.question, body.top_k, body.use_arxiv)
+    return {**result, "request_id": _request_id(request)}
 
 
 @router.post("/ask-pdf", response_model=AskResponse)
@@ -105,12 +109,13 @@ async def ask_pdf(
             "No extractable text found. Scanned PDFs need OCR, which isn't supported yet.",
         )
 
-    return await request.app.state.service.ask_pdf(
+    result = await request.app.state.service.ask_pdf(
         question=question,
         chunks=chunks,
         top_k=top_k,
-        filename=file.filename or "uploaded.pdf",
+        filename=safe_filename(file.filename or "uploaded.pdf"),
     )
+    return {**result, "request_id": _request_id(request)}
 
 
 @router.get("/health", response_model=HealthResponse)

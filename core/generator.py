@@ -80,9 +80,9 @@ class Generator:
         now = time.monotonic()
         return [p.name for p in self.providers if self._cooldown_until.get(p.name, 0) <= now]
 
-    async def generate(self, question: str, sources: list[dict]) -> GenResult:
+    async def generate(self, question: str, sources: list[dict], feedback: str | None = None) -> GenResult:
         warnings: list[str] = []
-        messages = build_prompt_messages(question, sources)
+        messages = build_prompt_messages(question, sources, feedback)
         for p in self.providers:
             if self._cooldown_until.get(p.name, 0) > time.monotonic():
                 warnings.append(f"{p.name} is cooling down")

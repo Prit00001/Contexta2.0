@@ -2,27 +2,65 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+ASK_REQUEST_EXAMPLE = {"question": "How does retrieval-augmented generation reduce hallucination?", "top_k": 3,
+                       "use_arxiv": True}
 
 
 class AskRequest(BaseModel):
-    question: str = Field(..., min_length=3, max_length=500)
-    top_k: int = Field(5, ge=1, le=10)
-    use_arxiv: bool = True
+    model_config = ConfigDict(json_schema_extra={"examples": [ASK_REQUEST_EXAMPLE]})
+
+    question: str = Field(..., min_length=3, max_length=500, description="The research question")
+    top_k: int = Field(5, ge=1, le=10, description="Maximum number of sources to use")
+    use_arxiv: bool = Field(True, description="Also search arXiv live (ignored if ARXIV_ENABLED=false)")
 
 
 class Source(BaseModel):
     id: str
     title: str
     source: str  # "local" | "arxiv" | "pdf"
-    url: str = ""  # empty for uploaded PDFs
+    url: str = ""  # empty for uploaded PDFs; always http(s) otherwise
     score: float
     snippet: str = ""
     authors: list[str] = []
     published: str = ""
-    page: Optional[int] = (
-        None  # set for uploaded PDFs (Optional, not `int | None`, for Python 3.9)
+    page: Optional[int] = None  # set for uploaded PDFs (Optional, not `int | None`, for Python 3.9)
+    marker: int = Field(0, description="The [n] number that refers to this source in the answer")
+    document_id: str = Field("", description="Paper / file this passage belongs to")
+    chunk_id: str = Field("", description="The specific passage: <document_id>#<chunk index>")
+
+
+class CitationOut(BaseModel):
+    marker: int
+    source_id: str
+    document_id: str
+    chunk_id: str
+    title: str
+    url: str = ""
+
+
+class ClaimOut(BaseModel):
+    text: str
+    markers: list[int] = []
+    status: Literal["cited", "uncited"]
+
+
+class CitationCheck(BaseModel):
+    verification: Literal["marker_only"] = Field(
+        "marker_only",
+        description="Markers are checked against retrieved sources; whether a source entails a claim is NOT verified",
     )
+    valid_markers: int = 0
+    removed_markers: list[int] = Field([], description="Hallucinated [n] numbers removed from the answer")
+    uncited_claims: int = 0
+
+
+class WorkflowStep(BaseModel):
+    stage: str
+    status: str
+    duration_ms: int
 
 
 class AskResponse(BaseModel):
@@ -35,10 +73,20 @@ class AskResponse(BaseModel):
     llm_used: bool
     cached: bool
     warnings: list[str] = []  # user-facing notes (arXiv down, PDF truncated, ...)
-    diagnostics: list[str] = (
-        []
-    )  # provider errors for debugging; the UI logs these to the console
+    diagnostics: list[str] = []  # provider errors for debugging; the UI logs these to the console
     timings_ms: dict[str, int] = {}
+    # ---- added in Contexta 2.0 (additive; the baseline fields above are unchanged) ----
+    request_id: str = ""
+    outcome: Literal["answered", "extractive_fallback", "insufficient_evidence"] = "answered"
+    citations: list[CitationOut] = []
+    claims: list[ClaimOut] = []
+    citation_check: CitationCheck = CitationCheck()
+    workflow: list[WorkflowStep] = []
+
+
+class ErrorResponse(BaseModel):
+    detail: str
+    request_id: str = ""
 
 
 class HealthResponse(BaseModel):

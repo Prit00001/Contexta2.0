@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 
 from core.text import clip
@@ -58,5 +58,15 @@ def format_sources(sources: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
-def build_prompt_messages(question: str, sources: list[dict]) -> list[BaseMessage]:
-    return PROMPT.format_messages(question=_neutralise(question), sources=format_sources(sources))
+RETRY_FEEDBACK = (
+    "Your previous answer did not cite any of the numbered sources. Answer again, citing the "
+    "supporting source numbers like [1] after each claim, or say the sources are insufficient."
+)
+
+
+def build_prompt_messages(question: str, sources: list[dict], feedback: str | None = None) -> list[BaseMessage]:
+    """System + human messages; ``feedback`` (from the workflow's validation step) is appended on retries."""
+    messages = PROMPT.format_messages(question=_neutralise(question), sources=format_sources(sources))
+    if feedback:
+        messages.append(HumanMessage(content=feedback))
+    return messages
