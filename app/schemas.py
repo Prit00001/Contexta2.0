@@ -5,8 +5,11 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
-ASK_REQUEST_EXAMPLE = {"question": "How does retrieval-augmented generation reduce hallucination?", "top_k": 3,
-                       "use_arxiv": True}
+ASK_REQUEST_EXAMPLE = {
+    "question": "How does retrieval-augmented generation reduce hallucination?",
+    "top_k": 3,
+    "use_arxiv": True,
+}
 
 
 class AskRequest(BaseModel):

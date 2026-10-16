@@ -4,5 +4,9 @@ __pycache__
 .env
 .cache
 .model_cache
+.storage
+.pytest_cache
+.ruff_cache
 tests
+docs
 *.md
