@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -48,6 +48,18 @@ class HealthResponse(BaseModel):
     embedding_backend: str
     llm_providers: list[str]
     arxiv_enabled: bool
+
+
+class ReadyCheck(BaseModel):
+    ok: bool
+    detail: str
+
+
+class ReadyResponse(BaseModel):
+    """`ready` = all checks ok; `degraded` = serving with reduced quality; `not_ready` = HTTP 503."""
+
+    status: Literal["ready", "degraded", "not_ready"]
+    checks: dict[str, ReadyCheck]
 
 
 # ---- Workspace document Q&A (Phase 1c) ----

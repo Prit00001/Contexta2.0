@@ -37,6 +37,7 @@ def _hash_embed(texts: list[str]) -> np.ndarray:
 
 class Embedder:
     def __init__(self, backend: str, model_name: str, cache_dir: str | None = None):
+        self.requested_backend = backend  # what config asked for; differs from .backend after a fallback
         self.backend = backend
         self.model_name = model_name
         self.dim = HASH_DIM
@@ -54,6 +55,11 @@ class Embedder:
             self.backend = "hash"
         self.dim = self.embed_sync(["probe"]).shape[1]
         log.info("Embedder ready: backend=%s model=%s dim=%d", self.backend, model_name, self.dim)
+
+    @property
+    def degraded(self) -> bool:
+        """True when a real model was requested but hash embeddings are in use (defect D-03)."""
+        return self.backend != self.requested_backend
 
     def embed_sync(self, texts: list[str]) -> np.ndarray:
         if not texts:

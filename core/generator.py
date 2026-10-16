@@ -116,6 +116,12 @@ class Generator:
     def provider_names(self) -> list[str]:
         return [p.name for p in self.providers]
 
+    @property
+    def available_provider_names(self) -> list[str]:
+        """Configured providers that are not currently on an error cooldown."""
+        now = time.monotonic()
+        return [p.name for p in self.providers if self._cooldown_until.get(p.name, 0) <= now]
+
     async def _call(self, p: ProviderSpec, messages: list[dict]) -> str:
         headers = {"Content-Type": "application/json", **p.headers}
         if p.api_key:

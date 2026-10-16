@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from collections import defaultdict, deque
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
 
-from app.schemas import AskRequest, AskResponse, HealthResponse
+from app.schemas import AskRequest, AskResponse, HealthResponse, ReadyCheck, ReadyResponse
 from core.pdf import chunk, extract_pages
 
 router = APIRouter()
@@ -35,14 +37,19 @@ class RateLimiter:
 
 
 def _client_ip(request: Request) -> str:
-    fwd = request.headers.get(
-        "x-forwarded-for"
-    )  # Vercel / Render / HF sit behind a proxy
-    return (
-        fwd.split(",")[0].strip()
-        if fwd
-        else (request.client.host if request.client else "unknown")
-    )
+    """Client address for rate limiting (SR-36, defect D-06).
+
+    Behind a platform proxy (Render / HF / Vercel) the socket peer is the proxy, so the
+    client IP comes from X-Forwarded-For. Only the right-most entry is trusted: it is the
+    one the platform's proxy appended. Left-most entries are whatever the client sent, so
+    using them (as the baseline did) let anyone bypass the limit with a fake header.
+    """
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd and request.app.state.settings.trust_proxy_headers:
+        hops = [h.strip() for h in fwd.split(",") if h.strip()]
+        if hops:
+            return hops[-1]
+    return request.client.host if request.client else "unknown"
 
 
 def _check_rate_limit(request: Request) -> None:
@@ -117,3 +124,70 @@ async def health(request: Request):
         llm_providers=st.generator.provider_names,
         arxiv_enabled=st.settings.arxiv_enabled,
     )
+
+
+def _db_ping(pool) -> None:
+    from core import db
+
+    conn = db.get_pool_conn(pool)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+    finally:
+        db.put_pool_conn(pool, conn)
+
+
+@router.get(
+    "/ready",
+    response_model=ReadyResponse,
+    responses={503: {"model": ReadyResponse, "description": "Not ready (index empty or not initialised)"}},
+)
+async def ready(request: Request):
+    """Readiness: is this instance able to answer research questions, and at what quality?
+
+    Never makes outbound calls to arXiv or LLM providers (that would spend quota on every
+    probe); reports configuration and local state only. Contains no secrets.
+    """
+    st = request.app.state
+    checks: dict[str, ReadyCheck] = {}
+    service = getattr(st, "service", None)
+    if service is None:
+        checks["service"] = ReadyCheck(ok=False, detail="not initialised")
+        body = ReadyResponse(status="not_ready", checks=checks)
+        return JSONResponse(body.model_dump(), status_code=503)
+
+    size = st.retriever.size
+    checks["index"] = ReadyCheck(ok=size > 0, detail=f"{size} documents indexed")
+    emb = st.embedder
+    checks["embeddings"] = ReadyCheck(
+        ok=not emb.degraded,
+        detail=f"{emb.backend} ({emb.model_name})"
+        + (" - model unavailable, using hash fallback; retrieval quality is reduced" if emb.degraded else ""),
+    )
+    available = st.generator.available_provider_names
+    names = st.generator.provider_names
+    if not names:
+        checks["llm"] = ReadyCheck(ok=False, detail="no provider configured - extractive answers only")
+    elif not available:
+        checks["llm"] = ReadyCheck(ok=False, detail="all providers cooling down after errors")
+    else:
+        checks["llm"] = ReadyCheck(ok=True, detail="available: " + ", ".join(available))
+    checks["arxiv"] = ReadyCheck(ok=True, detail="enabled" if st.settings.arxiv_enabled else "disabled")
+    if st.db_pool is None:
+        checks["database"] = ReadyCheck(ok=True, detail="not configured (workspace features off)")
+    else:
+        try:
+            await asyncio.wait_for(asyncio.to_thread(_db_ping, st.db_pool), timeout=3.0)
+            checks["database"] = ReadyCheck(ok=True, detail="reachable")
+        except Exception:  # noqa: BLE001 - any failure means "unreachable"; details stay in logs
+            checks["database"] = ReadyCheck(ok=False, detail="unreachable")
+
+    if not checks["index"].ok:
+        status = "not_ready"
+    elif all(c.ok for c in checks.values()):
+        status = "ready"
+    else:
+        status = "degraded"
+    body = ReadyResponse(status=status, checks=checks)
+    return JSONResponse(body.model_dump(), status_code=503 if status == "not_ready" else 200)

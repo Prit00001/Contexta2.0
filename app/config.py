@@ -1,4 +1,10 @@
-"""Central configuration, read once from environment variables."""
+"""Central configuration, read once from environment variables (and an optional .env file).
+
+Values are validated by Pydantic at startup. A malformed value (e.g. ``LLM_TIMEOUT=abc``) or an
+impossible combination (``REQUIRE_LLM=true`` with no provider) raises ``ConfigError`` naming the
+variable - the previous implementation silently fell back to defaults (defect D-04, FR-08).
+Empty variables (``DATABASE_URL=`` as in .env.example) are treated as unset.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +12,9 @@ import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 try:
     from dotenv import load_dotenv
@@ -15,16 +24,8 @@ except ImportError:  # pragma: no cover
     pass
 
 
-def _bool(name: str, default: bool) -> bool:
-    v = os.getenv(name)
-    return default if v is None else v.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _num(name: str, default, cast=int):
-    try:
-        return cast(os.getenv(name, default))
-    except (TypeError, ValueError):
-        return default
+class ConfigError(RuntimeError):
+    """Raised at startup when the environment configuration is invalid."""
 
 
 @dataclass(frozen=True)
@@ -32,135 +33,170 @@ class ProviderSpec:
     name: str
     base_url: str
     model: str
-    api_key: str = ""
+    api_key: str = field(default="", repr=False)  # never shown in repr/logs
     headers: dict = field(default_factory=dict)
     extra: dict = field(default_factory=dict)  # extra JSON fields for /chat/completions
 
 
-@dataclass(frozen=True)
-class Settings:
-    embed_backend: str
-    embed_model: str
-    cache_dir: Path
-    model_cache_dir: str | None
-    providers: tuple[ProviderSpec, ...]
-    llm_timeout: float
-    arxiv_enabled: bool
-    arxiv_max_results: int
-    arxiv_budget_s: float
-    arxiv_cache_ttl: int
-    answer_cache_ttl: int
-    rate_limit_per_min: int
-    min_score: float
-    allowed_origins: tuple[str, ...]
-    site_url: str
-    max_pdf_bytes: int
-    max_pdf_chunks: int
-    database_url: str
-    storage_backend: str
-    storage_dir: Path
-    storage_bucket: str
-    supabase_url: str
-    supabase_service_key: str
-    max_upload_mb: float
-    supabase_jwt_secret: str
-    redis_url: str
-    workspace_rate_limit_per_min: int
+KNOWN_PROVIDERS = ("groq", "gemini", "openrouter", "custom")
+
+# field name -> environment variable (only where they differ from FIELD.upper())
+_ENV_NAMES = {
+    "model_cache_dir": "FASTEMBED_CACHE_PATH",
+    "site_url": "APP_SITE_URL",
+    "llm_provider_order": "LLM_PROVIDERS",
+}
 
 
-def _build_providers() -> tuple[ProviderSpec, ...]:
-    site = os.getenv("APP_SITE_URL", "http://localhost:8000")
+class Settings(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
+
+    # embeddings / retrieval
+    embed_backend: Literal["fastembed", "hash"] = "fastembed"
+    embed_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    cache_dir: Path = Path(".cache")
+    model_cache_dir: Optional[str] = None
+    min_score: float = Field(0.2, ge=-1.0, le=1.0)
+
+    # LLM
+    providers: tuple[ProviderSpec, ...] = ()
+    llm_provider_order: tuple[str, ...] = KNOWN_PROVIDERS
+    llm_timeout: float = Field(25.0, gt=0, le=120)
+    llm_max_attempts: int = Field(2, ge=1, le=3)
+    require_llm: bool = False
+
+    # arXiv
+    arxiv_enabled: bool = True
+    arxiv_max_results: int = Field(12, ge=1, le=50)
+    arxiv_budget_s: float = Field(9.0, gt=0, le=60)
+    arxiv_cache_ttl: int = Field(3600, ge=0)
+
+    # API behaviour
+    answer_cache_ttl: int = Field(3600, ge=0)
+    rate_limit_per_min: int = Field(20, ge=0)
+    trust_proxy_headers: bool = True
+    allowed_origins: tuple[str, ...] = ("*",)
+    site_url: str = "http://localhost:8000"
+    max_pdf_mb: float = Field(4.0, gt=0, le=50)  # Vercel rejects bodies over ~4.5 MB
+    max_pdf_chunks: int = Field(300, ge=1, le=5000)
+
+    # observability
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    log_format: Literal["text", "json"] = "text"
+
+    # workspace platform (optional)
+    database_url: str = Field("", repr=False)
+    storage_backend: Literal["local", "supabase"] = "local"
+    storage_dir: Path = Path(".storage")
+    storage_bucket: str = "documents"
+    supabase_url: str = ""
+    supabase_service_key: str = Field("", repr=False)
+    max_upload_mb: float = Field(20.0, gt=0, le=200)
+    supabase_jwt_secret: str = Field("", repr=False)
+    redis_url: str = Field("", repr=False)
+    workspace_rate_limit_per_min: int = Field(60, ge=0)
+
+    @property
+    def max_pdf_bytes(self) -> int:
+        return int(self.max_pdf_mb * 1024 * 1024)
+
+    @model_validator(mode="after")
+    def _check_combinations(self) -> Settings:
+        unknown = [p for p in self.llm_provider_order if p not in KNOWN_PROVIDERS]
+        if unknown:
+            raise ValueError(f"unknown provider(s) {unknown}; expected any of {list(KNOWN_PROVIDERS)}")
+        if self.storage_backend == "supabase" and not (self.supabase_url and self.supabase_service_key):
+            raise ValueError("STORAGE_BACKEND=supabase requires SUPABASE_URL and SUPABASE_SERVICE_KEY")
+        if self.require_llm and not self.providers:
+            raise ValueError(
+                "REQUIRE_LLM=true but no LLM provider is configured "
+                "(set GROQ_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY or LLM_BASE_URL+LLM_MODEL)"
+            )
+        return self
+
+
+def _env(name: str) -> Optional[str]:
+    v = os.getenv(name)
+    return v.strip() if v is not None and v.strip() != "" else None
+
+
+def _csv(v: Optional[str]) -> Optional[tuple[str, ...]]:
+    return None if v is None else tuple(x.strip() for x in v.split(",") if x.strip())
+
+
+def _build_providers(order: tuple[str, ...], site: str) -> tuple[ProviderSpec, ...]:
     # llama-3.1-8b-instant and gemini-2.5-flash were retired in 2026 and now return 404.
-    groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+    groq_model = _env("GROQ_MODEL") or "openai/gpt-oss-20b"
     catalog = {
         "groq": ProviderSpec(
             "groq",
             "https://api.groq.com/openai/v1",
             groq_model,
-            os.getenv("GROQ_API_KEY", ""),
+            _env("GROQ_API_KEY") or "",
             # gpt-oss is a reasoning model; keep reasoning short so it doesn't eat the token budget
-            extra=(
-                {"reasoning_effort": "low"}
-                if groq_model.startswith("openai/gpt-oss")
-                else {}
-            ),
+            extra={"reasoning_effort": "low"} if groq_model.startswith("openai/gpt-oss") else {},
         ),
         "gemini": ProviderSpec(
             "gemini",
             "https://generativelanguage.googleapis.com/v1beta/openai",
-            os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
-            os.getenv("GEMINI_API_KEY", ""),
+            _env("GEMINI_MODEL") or "gemini-3.5-flash",
+            _env("GEMINI_API_KEY") or "",
         ),
         "openrouter": ProviderSpec(
             "openrouter",
             "https://openrouter.ai/api/v1",
-            os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free"),
-            os.getenv("OPENROUTER_API_KEY", ""),
+            _env("OPENROUTER_MODEL") or "meta-llama/llama-3.3-70b-instruct:free",
+            _env("OPENROUTER_API_KEY") or "",
             {"HTTP-Referer": site, "X-Title": "Contexta"},
         ),
         "custom": ProviderSpec(
             "custom",
-            os.getenv("LLM_BASE_URL", "").rstrip("/"),
-            os.getenv("LLM_MODEL", ""),
-            os.getenv("LLM_API_KEY", ""),
+            (_env("LLM_BASE_URL") or "").rstrip("/"),
+            _env("LLM_MODEL") or "",
+            _env("LLM_API_KEY") or "",
         ),
     }
-    order = [
-        p.strip()
-        for p in os.getenv("LLM_PROVIDERS", "groq,gemini,openrouter,custom").split(",")
-    ]
     out = []
     for name in order:
         spec = catalog.get(name)
-        if not spec:
-            continue
+        if spec is None:
+            continue  # reported by Settings validation
         # custom endpoints (e.g. Ollama) may not need a key, but need URL + model
-        ready = (
-            bool(spec.base_url and spec.model)
-            if name == "custom"
-            else bool(spec.api_key)
-        )
+        ready = bool(spec.base_url and spec.model) if name == "custom" else bool(spec.api_key)
         if ready:
             out.append(spec)
     return tuple(out)
 
 
+def load_settings() -> Settings:
+    """Build Settings from the environment. Raises ConfigError on invalid configuration."""
+    raw: dict[str, object] = {}
+    for name in Settings.model_fields:
+        if name in ("providers", "llm_provider_order", "allowed_origins"):
+            continue
+        value = _env(_ENV_NAMES.get(name, name.upper()))
+        if value is not None:
+            raw[name] = value
+    if "cache_dir" not in raw and os.getenv("VERCEL"):
+        raw["cache_dir"] = "/tmp/contexta-cache"  # Vercel's filesystem is read-only except /tmp
+    if "log_level" in raw:
+        raw["log_level"] = str(raw["log_level"]).upper()
+    if (origins := _csv(_env("ALLOWED_ORIGINS"))) is not None:
+        raw["allowed_origins"] = origins
+    order = _csv(_env("LLM_PROVIDERS")) or KNOWN_PROVIDERS
+    raw["llm_provider_order"] = order
+    raw["providers"] = _build_providers(order, str(raw.get("site_url", "http://localhost:8000")))
+    try:
+        return Settings.model_validate(raw)
+    except ValidationError as exc:
+        problems = []
+        for err in exc.errors():
+            loc = err["loc"][0] if err["loc"] else None
+            var = _ENV_NAMES.get(loc, str(loc).upper()) if loc else "configuration"
+            problems.append(f"{var}: {err['msg']}")  # the offending value is deliberately not echoed
+        raise ConfigError("Invalid configuration - " + "; ".join(problems)) from None
+
+
 @lru_cache
 def get_settings() -> Settings:
-    return Settings(
-        embed_backend=os.getenv("EMBED_BACKEND", "fastembed"),
-        embed_model=os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
-        # Vercel's filesystem is read-only except /tmp (Vercel sets VERCEL=1 at runtime)
-        cache_dir=Path(
-            os.getenv(
-                "CACHE_DIR", "/tmp/contexta-cache" if os.getenv("VERCEL") else ".cache"
-            )
-        ),
-        model_cache_dir=os.getenv("FASTEMBED_CACHE_PATH"),
-        providers=_build_providers(),
-        llm_timeout=_num("LLM_TIMEOUT", 25.0, float),
-        arxiv_enabled=_bool("ARXIV_ENABLED", True),
-        arxiv_max_results=_num("ARXIV_MAX_RESULTS", 12),
-        arxiv_budget_s=_num("ARXIV_BUDGET_S", 9.0, float),
-        arxiv_cache_ttl=_num("ARXIV_CACHE_TTL", 3600),
-        answer_cache_ttl=_num("ANSWER_CACHE_TTL", 3600),
-        rate_limit_per_min=_num("RATE_LIMIT_PER_MIN", 20),
-        min_score=_num("MIN_SCORE", 0.2, float),
-        allowed_origins=tuple(
-            o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()
-        ),
-        site_url=os.getenv("APP_SITE_URL", "http://localhost:8000"),
-        # Vercel rejects request bodies over ~4.5 MB before they reach the app
-        max_pdf_bytes=int(_num("MAX_PDF_MB", 4.0, float) * 1024 * 1024),
-        max_pdf_chunks=_num("MAX_PDF_CHUNKS", 300),
-        database_url=os.getenv("DATABASE_URL", ""),
-        storage_backend=os.getenv("STORAGE_BACKEND", "local"),
-        storage_dir=Path(os.getenv("STORAGE_DIR", ".storage")),
-        storage_bucket=os.getenv("STORAGE_BUCKET", "documents"),
-        supabase_url=os.getenv("SUPABASE_URL", ""),
-        supabase_service_key=os.getenv("SUPABASE_SERVICE_KEY", ""),
-        max_upload_mb=_num("MAX_UPLOAD_MB", 20.0, float),
-        supabase_jwt_secret=os.getenv("SUPABASE_JWT_SECRET", ""),
-        redis_url=os.getenv("REDIS_URL", ""),
-        workspace_rate_limit_per_min=_num("WORKSPACE_RATE_LIMIT_PER_MIN", 60),
-    )
+    return load_settings()
