@@ -132,6 +132,19 @@ def test_upload_ask_isolation_and_api_keys(tmp_path, monkeypatch):
             )
             assert r.status_code == 400
 
+            # Path traversal (D-01): a filename aimed at another workspace's prefix is stored under
+            # its sanitised basename inside this workspace, and nothing lands outside STORAGE_DIR.
+            r = c.post(
+                f"/workspaces/{ws_a}/documents",
+                files={"file": (f"../{org_b}/../../escape.md", b"# Note\nTraversal attempt.", "text/markdown")},
+                headers={"Authorization": f"Bearer {token_a}"},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["filename"] == "escape.md"
+            assert (tmp_path / ws_a / "escape.md").exists()
+            assert not (tmp_path.parent / "escape.md").exists()
+            c.delete(f"/workspaces/{ws_a}/documents/{r.json()['document_id']}", headers={"Authorization": f"Bearer {token_a}"})
+
             c.delete(f"/workspaces/{ws_a}/documents/{doc_id}", headers={"Authorization": f"Bearer {token_a}"})
     finally:
         with _conn() as conn, conn.cursor() as cur:

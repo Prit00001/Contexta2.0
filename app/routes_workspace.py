@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from app.deps import AuthContext, require_role
 from app.schemas import DocumentOut, UploadResponse, WorkspaceAskRequest, WorkspaceAskResponse
 from core import db
-from core.storage import get_storage
+from core.storage import get_storage, safe_filename
 from services.workspace_qa import ask_workspace
 
 router = APIRouter(prefix="/workspaces/{workspace_id}")
@@ -74,12 +74,16 @@ async def upload_document(
     await _check_rate_limit(request, workspace_id, ctx)
     settings = request.app.state.settings
     pool = request.app.state.db_pool
-    data = await file.read()
-    if len(data) > settings.max_upload_mb * 1024 * 1024:
+    max_bytes = int(settings.max_upload_mb * 1024 * 1024)
+    data = await file.read(max_bytes + 1)  # never buffer more than the limit
+    if len(data) > max_bytes:
         raise HTTPException(413, f"File exceeds the {settings.max_upload_mb} MB upload limit.")
-    content_type = _content_type_for(file.filename)
-    _check_magic_bytes(data, content_type, file.filename)
-    storage_path = f"{workspace_id}/{file.filename}"
+    # Client-supplied names may contain "../" or another workspace's prefix (D-01); only the
+    # sanitised basename is ever used for storage paths, the DB row and responses.
+    filename = safe_filename(file.filename)
+    content_type = _content_type_for(filename)
+    _check_magic_bytes(data, content_type, filename)
+    storage_path = f"{workspace_id}/{filename}"
     content_hash = hashlib.sha256(data).hexdigest()
 
     def _write():
@@ -87,14 +91,14 @@ async def upload_document(
         conn = db.get_pool_conn(pool)
         try:
             return db.upsert_document(
-                conn, workspace_id=workspace_id, filename=file.filename, content_type=content_type,
+                conn, workspace_id=workspace_id, filename=filename, content_type=content_type,
                 storage_path=storage_path, content_hash=content_hash, uploaded_by=ctx.user_id,
             )
         finally:
             db.put_pool_conn(pool, conn)
 
     doc_id, needs_ingest = await asyncio.to_thread(_write)
-    return UploadResponse(document_id=str(doc_id), filename=file.filename, status="queued" if needs_ingest else "ready")
+    return UploadResponse(document_id=str(doc_id), filename=filename, status="queued" if needs_ingest else "ready")
 
 
 @router.get("/documents", response_model=list[DocumentOut])
