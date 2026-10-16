@@ -64,9 +64,9 @@ State (`ResearchState`, a `TypedDict`): `question`, `top_k`, `options`, `sources
 | Node | Does | Next |
 |---|---|---|
 | `validate_request` | Re-checks question length/emptiness and `top_k` bounds (defence in depth for non-HTTP callers) | invalid → `finalize` (error) · ok → `retrieve` |
-| `retrieve` | `retriever.aretrieve(...)` → normalised sources + warnings | none → `insufficient_evidence` · some → `generate` |
+| `retrieve` | `retriever.aretrieve(...)` → normalised sources + warnings | none → `insufficient_evidence` · some → `generate` · retriever raised → `finalize` (error, HTTP 503) |
 | `generate` | `Generator.generate` (provider chain), attempts += 1 | LLM answer → `validate_answer` · no LLM → `fallback` |
-| `validate_answer` | `validate_citations` | usable → `finalize` · unusable and attempts < `LLM_MAX_ATTEMPTS` → `generate` · else → `fallback` |
+| `validate_answer` | `validate_citations` | usable → `finalize` · unusable and attempts < `LLM_MAX_ATTEMPTS` → `generate` (the retry prompt adds a "you cited nothing" instruction) · else → `fallback` |
 | `fallback` | Extractive answer from top sources + citation check | `finalize` |
 | `insufficient_evidence` | Fixed "sources don't cover this" answer, no LLM call | `finalize` |
 | `finalize` | Sets `outcome` | END |
@@ -75,11 +75,13 @@ Retries are bounded twice: `LLM_MAX_ATTEMPTS` (≤ 3) and the graph recursion li
 
 ## 6. Model-provider integration
 
-`ProviderSpec` (name, base URL, model, key, extra headers, extra body) is built from env vars by `app/config.py`. `core/llm.py` creates one `ChatOpenAI` per spec with `max_retries=0`, `timeout=LLM_TIMEOUT`, `temperature=0.2`, `max_tokens=1024`, provider-specific headers (OpenRouter `HTTP-Referer`/`X-Title`) and body (`reasoning_effort` for gpt-oss). The shared `httpx.AsyncClient` is injected, which keeps connection pooling and lets tests use `httpx.MockTransport` — no network in the default suite. SDK exceptions map to `LLMError(message, cooldown)` exactly as the pre-LangChain implementation did (SRS SR-11).
+`ProviderSpec` (name, base URL, model, key, extra headers, extra body) is built from env vars by `app/config.py`. `core/llm.py` creates one `ChatOpenAI` per spec with `max_retries=0`, `timeout=LLM_TIMEOUT`, `temperature=0.2`, a 1024-token output cap (sent by `langchain-openai` as `max_completion_tokens`), provider-specific headers (OpenRouter `HTTP-Referer`/`X-Title`) and body fields (`reasoning_effort` for gpt-oss, via `extra_body`).
+
+The OpenAI SDK under `ChatOpenAI` (v3) is built on `httpx2`, while the app shares one `httpx.AsyncClient`. `HttpxBridgeTransport` (an `httpx2` transport) forwards every SDK request through that shared client, so connection pooling, proxy settings and the User-Agent are shared, and tests drive providers with `httpx.MockTransport` — no network in the default suite. SDK exceptions map to `LLMError(message, cooldown)` with the same cooldown policy as the pre-LangChain implementation (SRS SR-11).
 
 ## 7. Configuration and dependency boundaries
 
-All settings are fields on one frozen Pydantic model created once (`get_settings()`, `lru_cache`). Invalid values fail fast at startup. Secrets are `SecretStr`-like: never included in `repr`, logs or responses. External services are injected (HTTP client, generator, retriever) so tests replace them without monkey-patching network code.
+All settings are fields on one frozen Pydantic model created once (`get_settings()`, `lru_cache`). Invalid values fail fast at startup with `ConfigError`. Secret fields (`api_key`, `database_url`, `supabase_*` keys, `redis_url`) are excluded from `repr`, are never logged and never appear in responses. External dependencies are injected: `create_app(http_transport=...)` replaces the network for every outbound call, the generator and retriever are passed into the graph, and the retriever is supplied per run via `config["configurable"]` — tests swap them without monkey-patching network code.
 
 ## 8. Error-handling strategy
 

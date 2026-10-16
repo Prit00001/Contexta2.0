@@ -302,3 +302,17 @@ def test_ask_pdf_rejects_bad_uploads(env):
         assert post(b"").status_code == 400
         assert post(b"hello").status_code == 415
         assert post(b"%PDF-1.4 garbage").status_code == 422
+
+
+def test_retriever_failure_returns_503_without_internal_detail(env):
+    env()
+    with client(FakeNet()) as c:
+
+        def broken_search(qvec, k):
+            raise RuntimeError("FAISS index file /srv/secret/path is corrupted")
+
+        c.app.state.service.research_retriever.library.search = broken_search
+        r = c.post("/ask", json={"question": QUESTION, "use_arxiv": False})
+    assert r.status_code == 503
+    assert r.json()["detail"] == "Retrieval is temporarily unavailable. Please try again."
+    assert "secret" not in r.text and "FAISS" not in r.text

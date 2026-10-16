@@ -192,8 +192,9 @@ def load_settings() -> Settings:
         problems = []
         for err in exc.errors():
             loc = err["loc"][0] if err["loc"] else None
-            var = _ENV_NAMES.get(loc, str(loc).upper()) if loc else "configuration"
-            problems.append(f"{var}: {err['msg']}")  # the offending value is deliberately not echoed
+            msg = err["msg"].removeprefix("Value error, ")
+            # the offending value is deliberately not echoed
+            problems.append(f"{_ENV_NAMES.get(loc, str(loc).upper())}: {msg}" if loc else msg)
         raise ConfigError("Invalid configuration - " + "; ".join(problems)) from None
 
 
