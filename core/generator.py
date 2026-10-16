@@ -1,44 +1,32 @@
 """LLM answer generation with a provider fallback chain.
 
-Every provider speaks the OpenAI-style /chat/completions protocol, so one code path serves
-Groq, Gemini, OpenRouter, Ollama or anything else compatible. A provider that rate-limits or
-fails is put on a short cooldown and the next one is tried. If all fail, we return an
-extractive answer built from the retrieved passages, so the app never goes down with the LLM.
+Each provider is called through the LangChain adapter in ``core.llm`` (``ChatOpenAI`` over the
+OpenAI-compatible protocol) with the prompt from ``core.prompts``. A provider that rate-limits
+or fails is put on a cooldown and the next one is tried. If all fail, an extractive answer built
+from the retrieved passages is returned, so the app never goes down with the LLM.
+
+The chain itself stays here rather than in LangChain's ``with_fallbacks()`` because the
+cooldowns must persist across requests: a rate-limited free-tier provider is skipped for the
+next 20-120 s instead of being retried by every request (ADR-001).
 """
 
 from __future__ import annotations
 
 import logging
-import re
 import time
 from dataclasses import dataclass, field
 
 import httpx
 
 from app.config import ProviderSpec
+from core.citations import strip_invalid_markers
+from core.llm import LLMError, invoke_chat, make_chat_model
+from core.prompts import build_prompt_messages
 from core.text import clip, keywords, lexical_score, split_sentences
 
 log = logging.getLogger("contexta.generator")
 
-SYSTEM_PROMPT = (
-    "You are Contexta, a research assistant. Answer the question using ONLY the numbered sources "
-    "provided (papers or excerpts from a document the user uploaded). Cite inline right after the "
-    "claims they support, like [1] or [2][3]. If the sources do not contain enough information, say "
-    "so plainly instead of guessing. Be concise: 120-220 words, plain prose, no headings or bullet lists."
-)
-
-_MODEL_ENV = {
-    "groq": "GROQ_MODEL",
-    "gemini": "GEMINI_MODEL",
-    "openrouter": "OPENROUTER_MODEL",
-    "custom": "LLM_MODEL",
-}
-
-
-def _label(s: dict) -> str:
-    if s["source"] == "pdf":
-        return f"uploaded PDF, page {s.get('page', '?')}"
-    return "arXiv" if s["source"] == "arxiv" else "knowledge base"
+__all__ = ["GenResult", "Generator", "LLMError", "extractive_answer"]
 
 
 def _body(s: dict) -> str:
@@ -51,12 +39,6 @@ def _body(s: dict) -> str:
     return text.split(". ", 1)[-1] if s["source"] == "local" else text
 
 
-class LLMError(Exception):
-    def __init__(self, message: str, cooldown: float = 30.0):
-        super().__init__(message)
-        self.cooldown = cooldown
-
-
 @dataclass
 class GenResult:
     answer: str
@@ -64,18 +46,7 @@ class GenResult:
     model: str
     llm_used: bool
     warnings: list[str] = field(default_factory=list)
-
-
-def build_messages(question: str, sources: list[dict]) -> list[dict]:
-    blocks = [
-        f"[{i}] {s['title']} ({_label(s)})\n{clip(s['text'], 700)}"
-        for i, s in enumerate(sources, 1)
-    ]
-    user = f"Question: {question}\n\nSources:\n\n" + "\n\n".join(blocks)
-    return [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user},
-    ]
+    removed_markers: list[int] = field(default_factory=list)  # hallucinated [n] numbers that were stripped
 
 
 def extractive_answer(question: str, sources: list[dict]) -> str:
@@ -83,9 +54,7 @@ def extractive_answer(question: str, sources: list[dict]) -> str:
     terms = set(keywords(question, 8))
     parts = []
     for i, s in enumerate(sources[:3], 1):
-        sents = [
-            x for x in split_sentences(_body(s)) if len(x) >= 40
-        ] or split_sentences(_body(s))
+        sents = [x for x in split_sentences(_body(s)) if len(x) >= 40] or split_sentences(_body(s))
         if not sents:
             continue
         best = max(sents, key=lambda x: (lexical_score(terms, x), -len(x)))
@@ -93,24 +62,13 @@ def extractive_answer(question: str, sources: list[dict]) -> str:
     return " ".join(parts) or "No relevant passages were found."
 
 
-def _retry_after(resp: httpx.Response) -> float:
-    try:
-        return float(resp.headers.get("retry-after", "0"))
-    except ValueError:
-        return 0.0
-
-
 class Generator:
-    def __init__(
-        self,
-        providers: tuple[ProviderSpec, ...],
-        client: httpx.AsyncClient,
-        timeout: float = 25.0,
-    ):
+    def __init__(self, providers: tuple[ProviderSpec, ...], client: httpx.AsyncClient, timeout: float = 25.0):
         self.providers = providers
         self.client = client
         self.timeout = timeout
         self._cooldown_until: dict[str, float] = {}
+        self._models = {p.name: make_chat_model(p, client, timeout) for p in providers}
 
     @property
     def provider_names(self) -> list[str]:
@@ -122,73 +80,43 @@ class Generator:
         now = time.monotonic()
         return [p.name for p in self.providers if self._cooldown_until.get(p.name, 0) <= now]
 
-    async def _call(self, p: ProviderSpec, messages: list[dict]) -> str:
-        headers = {"Content-Type": "application/json", **p.headers}
-        if p.api_key:
-            headers["Authorization"] = f"Bearer {p.api_key}"
-        # 1024 leaves room for reasoning models (gpt-oss, Gemini 3.x) to think and still answer
-        payload = {
-            "model": p.model,
-            "messages": messages,
-            "temperature": 0.2,
-            "max_tokens": 1024,
-            **p.extra,
-        }
-        try:
-            r = await self.client.post(
-                f"{p.base_url}/chat/completions",
-                json=payload,
-                headers=headers,
-                timeout=self.timeout,
-            )
-        except httpx.TimeoutException:
-            raise LLMError("timed out", 30)
-        except httpx.HTTPError as exc:
-            raise LLMError(f"network error ({type(exc).__name__})", 30)
-
-        if r.status_code == 429:
-            raise LLMError("rate limited", min(max(_retry_after(r), 20), 120))
-        if r.status_code in (401, 403):
-            raise LLMError("API key rejected", 600)
-        if (
-            r.status_code == 404
-        ):  # a config problem, not a capacity one: usually a retired model ID
-            env = _MODEL_ENV.get(p.name, "the model setting")
-            raise LLMError(f"model '{p.model}' not found (HTTP 404); check {env}", 600)
-        if r.status_code >= 400:
-            raise LLMError(f"HTTP {r.status_code}", 30)
-        try:
-            data = r.json()
-            if "error" in data:  # some gateways return 200 + error body
-                raise LLMError("provider error", 30)
-            text = (data["choices"][0]["message"]["content"] or "").strip()
-        except (ValueError, KeyError, IndexError, TypeError):
-            raise LLMError("malformed response", 30)
-        if not text:
-            raise LLMError("empty response", 30)
-        return text
-
     async def generate(self, question: str, sources: list[dict]) -> GenResult:
         warnings: list[str] = []
-        messages = build_messages(question, sources)
+        messages = build_prompt_messages(question, sources)
         for p in self.providers:
             if self._cooldown_until.get(p.name, 0) > time.monotonic():
                 warnings.append(f"{p.name} is cooling down")
                 continue
+            t0 = time.perf_counter()
             try:
-                text = await self._call(p, messages)
+                text = await invoke_chat(self._models[p.name], p, messages)
             except LLMError as exc:
                 self._cooldown_until[p.name] = time.monotonic() + exc.cooldown
                 warnings.append(f"{p.name}: {exc}")
-                log.warning("LLM provider %s failed: %s", p.name, exc)
+                log.warning(
+                    "LLM provider %s failed: %s",
+                    p.name,
+                    exc,
+                    extra={
+                        "event": "llm.call",
+                        "provider": p.name,
+                        "status": "error",
+                        "category": "llm_unavailable",
+                        "duration_ms": round((time.perf_counter() - t0) * 1000),
+                        "cooldown_s": exc.cooldown,
+                    },
+                )
                 continue
-            n = len(sources)  # drop hallucinated citation numbers
-            text = re.sub(
-                r"\[(\d+)\]",
-                lambda m: m.group(0) if 1 <= int(m.group(1)) <= n else "",
-                text,
+            log.info(
+                "LLM provider %s answered",
+                p.name,
+                extra={
+                    "event": "llm.call",
+                    "provider": p.name,
+                    "status": "ok",
+                    "duration_ms": round((time.perf_counter() - t0) * 1000),
+                },
             )
-            return GenResult(text, p.name, p.model, True, warnings)
-        return GenResult(
-            extractive_answer(question, sources), "none", "extractive", False, warnings
-        )
+            text, removed = strip_invalid_markers(text, len(sources))  # drop hallucinated citation numbers
+            return GenResult(text, p.name, p.model, True, warnings, removed)
+        return GenResult(extractive_answer(question, sources), "none", "extractive", False, warnings)
