@@ -151,7 +151,7 @@ ruff check . && ruff format --check .
 python scripts/smoke_test.py --base-url http://127.0.0.1:8000   # against a running server
 ```
 
-Phase 1 result: **180 passed** on Python 3.13 and 3.11 (with the DB tests). Details: [TEST_REPORT](docs/testing/TEST_REPORT.md) · [TEST_STRATEGY](docs/testing/TEST_STRATEGY.md).
+Phase 1 result: **181 passed** on Python 3.13 and 3.11 (with the DB tests; 178 passed + 3 skipped without a database). Details: [TEST_REPORT](docs/testing/TEST_REPORT.md) · [TEST_STRATEGY](docs/testing/TEST_STRATEGY.md).
 
 ## Troubleshooting
 

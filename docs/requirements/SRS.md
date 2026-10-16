@@ -31,7 +31,7 @@ Request (JSON, validated):
 
 | Field | Type | Constraints | Default |
 |---|---|---|---|
-| `question` | string | 3–500 chars after trimming | required |
+| `question` | string | 3–500 chars (whitespace is collapsed before processing) | required |
 | `top_k` | int | 1–10 | 5 |
 | `use_arxiv` | bool | | true |
 
