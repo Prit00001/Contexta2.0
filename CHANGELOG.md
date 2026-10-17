@@ -2,6 +2,12 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Phase 2 Stage 0
+
+### Fixed
+- `OPENROUTER_MODEL` default was a model OpenRouter's catalog no longer serves (`HTTP 404`, confirmed live); replaced with a currently-available free model.
+- Test suite leaked real provider API keys from a local `.env` into test runs (`load_dotenv()` refilled env vars that `tests/conftest.py` had popped); tests are now isolated regardless of what `.env` contains.
+
 ## [2.0.0-phase1] — 2026-10-16
 
 Contexta 2.0 is a separate project seeded from `Prit00001/Contexta` @ `3f59589` (history preserved).

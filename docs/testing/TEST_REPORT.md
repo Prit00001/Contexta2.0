@@ -83,14 +83,26 @@ The sandbox's egress allowlist blocks: `export.arxiv.org`, all LLM provider APIs
 - The Docker image was **not built**; even `docker build --check` fails to resolve the base image.
 - CI was **not executed** (no GitHub remote configured).
 
-## 5. Blocked tests — to run with network access and real keys
+## 5. Blocked tests — Phase 2 Stage 0 results (2026-10-17)
 
-| # | Test | Command | Expected |
+Run from a different sandbox than §1–4 (macOS, Python 3.12.14 via `uv`), with a different network
+profile: `huggingface.co` and `export.arxiv.org` are unreachable here too, but `storage.googleapis.com`,
+`api.groq.com`, `generativelanguage.googleapis.com`, `openrouter.ai`, `registry-1.docker.io` and
+`github.com` all are.
+
+| # | Test | Result | Evidence |
 |---|---|---|---|
-| B-1 | Real embedding model | `uvicorn app.main:app` then `GET /ready` | `embeddings.ok = true`, backend `fastembed` |
-| B-2 | Live arXiv | `scripts/smoke_test.py` + `curl /ask` with `"use_arxiv": true` | arXiv sources present, no arXiv warning |
-| B-3 | Groq | `GROQ_API_KEY=… LLM_PROVIDERS=groq` + `smoke_test.py --expect-llm` | 13/13, provider `groq` |
-| B-4 | Gemini (incl. `max_completion_tokens` acceptance) | `GEMINI_API_KEY=… LLM_PROVIDERS=gemini` + smoke | 13/13; if 400, set a different model or report |
-| B-5 | OpenRouter | `OPENROUTER_API_KEY=… LLM_PROVIDERS=openrouter` + smoke | 13/13 |
-| B-6 | Docker | `docker build -t contexta . && docker run -p 8000:8000 contexta` + smoke | 12/12 (13 with a key); `/ready` embeddings ok |
-| B-7 | CI | push to GitHub | lint, test (3.11, 3.13), docker jobs green |
+| B-1 | Real embedding model | **PASS** | `TextEmbedding(model_name='sentence-transformers/all-MiniLM-L6-v2')` downloaded for real via fastembed's GCS fallback URL (`storage.googleapis.com/qdrant-fastembed/...` — `huggingface.co` itself stayed unreachable) and embedded text, dim=384, ~79s cold. Confirmed again inside a built Docker image: `GET /ready` → `embeddings.ok: true, detail: "fastembed (sentence-transformers/all-MiniLM-L6-v2)"`. |
+| B-2 | Live arXiv | **Still blocked, not a clean pass** | `export.arxiv.org` is unreachable (connection timeout on every resolved IP). A workaround was tried: `arxiv.org` (same Fastly CDN, same wildcard cert) is reachable, so reusing its connection path while keeping the correct SNI/Host (`export.arxiv.org`) got through twice with genuine `429 Rate exceeded` responses from arXiv's own API — proving the service is reachable under *some* conditions. A 5-attempt retry with proper spacing then got 0/5 through, as did testing all 5 of arXiv's resolved IPs directly. Too flaky to call this a pass; not something to build into `services/arxiv_client.py` (sandbox-specific routing quirk, not a production concern). Needs a network without this quirk to close cleanly. |
+| B-3 | Groq | **PASS** | `smoke_test.py --expect-llm` → 13/13, `outcome: answered via groq/openai/gpt-oss-20b`. |
+| B-4 | Gemini (incl. `max_completion_tokens` acceptance) | **PASS** | First attempt hit a transient `HTTP 503` (Gemini's own overload, confirmed via server logs — not a 400/parameter-rejection). Retried past the 30s cooldown: `smoke_test.py --expect-llm` → 13/13, `outcome: answered via gemini/gemini-3.5-flash`. `max_completion_tokens` is accepted fine. |
+| B-5 | OpenRouter | **PASS, after fixing a real bug** | Default `OPENROUTER_MODEL` (`meta-llama/llama-3.3-70b-instruct:free`) returned `HTTP 404` — confirmed live against `GET /api/v1/models` that it's genuinely gone from OpenRouter's catalog, not a transient issue. Replaced the default with `liquid/lfm-2.5-2.6b:free` (`app/config.py`); verified `smoke_test.py --expect-llm` → 13/13, `outcome: answered via openrouter/liquid/lfm-2.5-2.6b:free`. |
+| B-6 | Docker | **PASS** | `docker build -t contexta2-test .` succeeded (298s, real embedding model baked in); `docker run` + `curl /health` → `{"status":"ok",...}`; `curl /ready` → `degraded` only on the (expected, no key configured) `llm` check, `embeddings.ok: true`. Matches the documented behaviour exactly. |
+| B-7 | CI | **Blocked on a one-time human step** | Pushed to `github.com/Prit001/Contexta2.0` (`main`, `phase-1`, `phase-2`). `GET /repos/.../actions/workflows` stayed at `total_count: 0` — tracked down to two real causes, both fixed where fixable: (1) `main` is deliberately the pre-Phase-1 baseline and never had `.github/workflows/ci.yml`, so GitHub Actions wasn't registered for the repo at all; fixed by switching the GitHub repo's default branch to `phase-2`. (2) Even after that plus a fresh push, workflows stayed unregistered — GitHub gates a repository's very first Actions usage behind a one-time manual "enable workflows" click in the web UI, which only the repo owner can do. Waiting on that click; `gh run list` re-checked after and still empty. |
+
+**A side effect of this verification pass: a real test-isolation bug was found and fixed.** The moment a
+real `.env` with real provider keys existed, 3 tests failed — `tests/conftest.py` popped the key env vars
+to isolate tests, but `app/config.py`'s `load_dotenv()` only fills vars that are *absent*, so it silently
+refilled the popped keys from the real `.env` the instant `app.config` was first imported. Fixed by setting
+them to empty strings instead of popping (still "present", so `load_dotenv()` leaves them alone). Re-run:
+**181 passed**, `ruff check`/`format --check` clean.

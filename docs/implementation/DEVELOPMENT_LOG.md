@@ -73,3 +73,41 @@ Branch `phase-1`, one commit per milestone (see `git log main..phase-1`). Nothin
 **Mistakes during the session (no lasting effect):** a `pkill -f` pattern matched its own shell and aborted a manual smoke run (re-run from a script file); uninstalling `pyyaml` from the dev venv briefly broke `langchain-core` (it is a real dependency in the lock; venv re-synced from the lockfile).
 
 **Outstanding:** live-provider verification (incl. Gemini and `max_completion_tokens`), live arXiv, real embedding model, Docker build, CI run — all blocked by the environment; see TEST_REPORT §5 and the completion report.
+
+## Session 3 — 2026-10-17 (Phase 2 Stage 0: re-baseline, close B-1…B-7)
+
+**Environment:** macOS sandbox, Python 3.12.14 (`uv venv`), Docker available, network profile different
+from Session 1/2: `huggingface.co` and `export.arxiv.org` unreachable, but `storage.googleapis.com`,
+Groq/Gemini/OpenRouter and Docker Hub/GitHub all reachable.
+
+**Re-baseline:** fresh `uv pip install -r requirements-dev.txt` (needed a retry with `UV_HTTP_TIMEOUT=180`
+for one large wheel over a slow connection) → `pytest -q` 178 passed/3 skipped (no DB), 181 passed (with
+`DATABASE_URL`, reusing the Postgres container from the sibling Contexta project — migrations confirmed
+byte-identical first). `ruff check`/`format --check` clean. Every fact in the Phase 2 prompt's §2 was
+grepped/read directly in the source, not trusted from docs — all true.
+
+**B-1…B-7:** see TEST_REPORT §5 for the full table. Summary: B-1 (real embeddings), B-3/4/5 (Groq/Gemini/
+OpenRouter), B-6 (Docker) all closed PASS. B-2 (live arXiv) tried an SNI-passthrough workaround that
+worked twice then failed 5/5 on retry — too flaky to count as closed. B-7 (CI) blocked on GitHub's one-time
+manual "enable workflows" step, which only the repo owner can click.
+
+**Bugs found and fixed (not just worked around):**
+- `OPENROUTER_MODEL` default (`meta-llama/llama-3.3-70b-instruct:free`) is gone from OpenRouter's catalog
+  (confirmed live against `GET /api/v1/models`) → replaced with `liquid/lfm-2.5-2.6b:free`, verified
+  working. `app/config.py`.
+- `tests/conftest.py` isolated tests from real API keys by popping the env vars, but `app/config.py`'s
+  `load_dotenv()` only fills *absent* vars, so a real `.env` silently refilled them the moment `app.config`
+  was first imported — 3 tests failed once real keys existed. Fixed by setting them to `""` instead
+  (present but empty; `_env()` already treats that as unset).
+
+**Repo/GitHub setup:** created branch `phase-2` from `phase-1`; added remote `origin` →
+`github.com/Prit001/Contexta2.0` (confirmed empty before pushing); pushed `main`, `phase-1`, `phase-2`.
+Switched the GitHub repo's default branch from `main` (deliberately the pre-Phase-1 baseline, never had
+the CI workflow) to `phase-2`, so Actions can register — a repo setting, not a history change.
+
+**Mistake during the session (caught before it mattered):** typed `--connect-to`/`--resolve` curl tricks
+against `export.arxiv.org` directly in test commands at first, risking key-adjacent log noise; moved to a
+disposable `/tmp` script with no secrets, deleted after use. No key value was ever echoed to any log —
+checked with `grep -l` across all test server logs before cleanup.
+
+**Outstanding:** B-2 and B-7 as above; Stage A (evaluation set + harness) not yet started.
