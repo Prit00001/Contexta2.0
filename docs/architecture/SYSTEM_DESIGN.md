@@ -116,3 +116,18 @@ All settings are fields on one frozen Pydantic model created once (`get_settings
 | No mass reformat of legacy files | Keeps diffs reviewable | Formatting check scoped to new/changed modules |
 
 Full rationale: [ADR-001](../decisions/ADR-001-project-architecture.md).
+
+## 11. Planned Phase 2 additions (Stage B — not yet built)
+
+Per [PRD_PHASE_2.md](../requirements/PRD_PHASE_2.md); this section gets filled in with real design
+detail as each lands in Stage C, not speculatively ahead of time.
+
+| Addition | Where | Driven by |
+|---|---|---|
+| BM25 fused with the existing hybrid ranking (RRF) | new module alongside `core/lc_retriever.py`, flag-gated | P2-FR-03 |
+| Claim-support check | new graph node after `validate_answer` in `services/research_graph.py` | P2-FR-04 |
+| Workspace Q&A on the graph | `services/workspace_qa.py` calls the compiled graph instead of `Generator` directly | P2-FR-06 |
+| Redis-backed `/ask` cache + limiter, `GET /metrics` | `app/main.py`, new `app/metrics.py` | P2-FR-07 |
+
+Eval harness (`eval/run_eval.py`, `core/lc_retriever.ResearchRetriever` reused directly) and its
+dataset (`eval/dataset/`) are Stage A, already built — see [ADR-002](../decisions/ADR-002-evaluation-methodology.md).
