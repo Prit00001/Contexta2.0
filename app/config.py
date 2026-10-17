@@ -145,7 +145,9 @@ def _build_providers(order: tuple[str, ...], site: str) -> tuple[ProviderSpec, .
         "openrouter": ProviderSpec(
             "openrouter",
             "https://openrouter.ai/api/v1",
-            _env("OPENROUTER_MODEL") or "meta-llama/llama-3.3-70b-instruct:free",
+            # meta-llama/llama-3.3-70b-instruct:free was removed from OpenRouter's catalog (404,
+            # confirmed live against /api/v1/models during Phase 2 B-5 verification, 2026-10-17).
+            _env("OPENROUTER_MODEL") or "liquid/lfm-2.5-2.6b:free",
             _env("OPENROUTER_API_KEY") or "",
             {"HTTP-Referer": site, "X-Title": "Contexta"},
         ),
