@@ -1,7 +1,7 @@
 # Common tasks. Windows users: run the commands shown after each target directly.
 PY ?= python
 
-.PHONY: install run run-demo fake-llm test test-db lint format smoke lock
+.PHONY: install run run-demo fake-llm test test-db lint format smoke eval lock
 
 install:          ## create .venv and install pinned dev dependencies
 	$(PY) -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
@@ -30,6 +30,9 @@ format:
 
 smoke:            ## end-to-end checks against a running server
 	$(PY) scripts/smoke_test.py --base-url http://127.0.0.1:8000
+
+eval:             ## retrieval-only eval metrics, offline (add --with-llm yourself for the full run)
+	$(PY) eval/run_eval.py
 
 lock:             ## re-pin dependencies after editing requirements*.in
 	uv pip compile requirements.in --universal --python-version 3.11 -o requirements.txt
