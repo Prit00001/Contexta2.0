@@ -51,13 +51,19 @@ class Embedder:
         self._model = None
         self._lock = threading.Lock()
         if backend == "fastembed":
-            try:
-                from fastembed import TextEmbedding
+            from fastembed import TextEmbedding
 
-                self._model = TextEmbedding(model_name=model_name, cache_dir=cache_dir)
-            except Exception as exc:  # noqa: BLE001
-                log.error("fastembed failed to load (%s); using hash embeddings", exc)
-                self.backend = "hash"
+            try:
+                # Already cached from a previous run: single local lookup, no network at all.
+                self._model = TextEmbedding(model_name=model_name, cache_dir=cache_dir, local_files_only=True)
+            except Exception:
+                try:
+                    # Not cached yet: one real network attempt (not fastembed's default of 3 retries
+                    # with sleeps between them) - fails fast instead of ~45s when offline (P2-FR-02).
+                    self._model = TextEmbedding(model_name=model_name, cache_dir=cache_dir, retries=1)
+                except Exception as exc:  # noqa: BLE001
+                    log.error("fastembed failed to load (%s); using hash embeddings", exc)
+                    self.backend = "hash"
         else:
             self.backend = "hash"
         self.dim = self.embed_sync(["probe"]).shape[1]
