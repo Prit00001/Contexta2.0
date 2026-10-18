@@ -20,6 +20,7 @@ A provider is *configured* when its key is set (for `custom`: when both `LLM_BAS
 | `LLM_PROVIDERS` | `groq,gemini,openrouter,custom` | no | Comma-separated subset/order; unknown names are an error |
 | `LLM_TIMEOUT` | `25` | no | Seconds per provider call, (0, 120] |
 | `LLM_MAX_ATTEMPTS` | `2` | no | Generation attempts per question in the workflow, 1–3 |
+| `CLAIM_CHECK` | `off` | `llm`: after citation validation, check each cited claim against its cited text — verbatim quotes locally, the rest in one LLM-judge call through the provider chain. Adds `claims[].support` and claim counts to `citation_check`. Costs one extra LLM call per uncached answer; judge precision not yet measured |
 | `REQUIRE_LLM` | `false` | no | `true`: refuse to start with no configured provider |
 
 No provider configured → the app still answers (`outcome: extractive_fallback`) and `/ready` reports `degraded`.

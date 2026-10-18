@@ -223,7 +223,7 @@ async def run_answers(questions: list[dict]) -> list[dict]:
             embedder=embedder, library=library, arxiv=arxiv, arxiv_enabled=False,
             arxiv_budget_s=settings.arxiv_budget_s, min_score=settings.min_score_for(embedder.backend),
         )  # fmt: skip
-        graph = build_research_graph(generator, settings.llm_max_attempts)
+        graph = build_research_graph(generator, settings.llm_max_attempts, claim_check=settings.claim_check == "llm")
 
         results = []
         for q in questions:

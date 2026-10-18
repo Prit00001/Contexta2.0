@@ -1,12 +1,14 @@
 """The research workflow as an explicit LangGraph ``StateGraph`` (FR-15, SR-20..SR-24).
 
-    validate_request -> retrieve -> generate -> validate_answer -> finalize
-                         |            |              |  ^
+    validate_request -> retrieve -> generate -> validate_answer -> [check_claims] -> finalize
+                         |            |              |  ^                ^
                          |            |              |  | retry with feedback (attempts < max)
-                         |            v              v  |
-                         |         fallback <--------+--+   (no LLM answer / still unusable)
+                         |            v              v  |                |
+                         |         fallback <--------+--+ ---------------+   (no LLM answer / still unusable)
                          v
                  insufficient_evidence -> finalize
+
+* ``check_claims`` (P2-FR-04) exists only when ``claim_check=True`` (``CLAIM_CHECK=llm``).
 
 * Conditional edges exist only where the next step genuinely depends on the result.
 * Generation is bounded by ``LLM_MAX_ATTEMPTS`` (1-3) and the graph by a recursion limit.
@@ -27,6 +29,7 @@ from langgraph.graph import END, START, StateGraph
 
 from core import metrics
 from core.citations import validate_citations
+from core.claim_support import check_claims as run_claim_check
 from core.generator import Generator, extractive_answer
 from core.prompts import RETRY_FEEDBACK
 
@@ -99,8 +102,9 @@ def _traced(stage: str):
     return wrap
 
 
-def build_research_graph(generator: Generator, max_attempts: int = 2):
+def build_research_graph(generator: Generator, max_attempts: int = 2, claim_check: bool = False):
     max_attempts = max(1, min(int(max_attempts), 3))
+    answered_next = "check_claims" if claim_check else "finalize"
 
     @_traced("validate_request")
     async def validate_request(state: ResearchState, config: RunnableConfig):
@@ -203,6 +207,15 @@ def build_research_graph(generator: Generator, max_attempts: int = 2):
             "outcome": "insufficient_evidence",
         }, "ok"
 
+    @_traced("check_claims")
+    async def check_claims(state: ResearchState, config: RunnableConfig):
+        report = state["citation_report"]
+        status, diagnostics = await run_claim_check(report, state["sources"], generator.judge)
+        update = {"citation_report": report, "diagnostics": diagnostics}
+        if status != "ok":
+            update["_category"] = "llm_unavailable" if status == "judge_unavailable" else "llm_invalid_output"
+        return update, status
+
     @_traced("finalize")
     async def finalize(state: ResearchState, config: RunnableConfig):
         outcome = state.get("outcome") or "answered"
@@ -222,18 +235,21 @@ def build_research_graph(generator: Generator, max_attempts: int = 2):
     def after_validate_answer(state: ResearchState) -> str:
         report = state["citation_report"]
         if report.usable(has_sources=bool(state["sources"])):
-            return "finalize"
+            return answered_next
         return "generate" if state["attempts"] < max_attempts else "fallback"
 
     g = StateGraph(ResearchState)
-    for node in (validate_request, retrieve, generate, validate_answer, fallback, insufficient_evidence, finalize):
+    nodes = [validate_request, retrieve, generate, validate_answer, fallback, insufficient_evidence, finalize]
+    for node in nodes + ([check_claims] if claim_check else []):
         g.add_node(node.__name__, node)
     g.add_edge(START, "validate_request")
     g.add_conditional_edges("validate_request", after_validate_request, ["retrieve", "finalize"])
     g.add_conditional_edges("retrieve", after_retrieve, ["generate", "insufficient_evidence", "finalize"])
     g.add_conditional_edges("generate", after_generate, ["validate_answer", "fallback"])
-    g.add_conditional_edges("validate_answer", after_validate_answer, ["finalize", "generate", "fallback"])
-    g.add_edge("fallback", "finalize")
+    g.add_conditional_edges("validate_answer", after_validate_answer, [answered_next, "generate", "fallback"])
+    g.add_edge("fallback", answered_next)
+    if claim_check:
+        g.add_edge("check_claims", "finalize")
     g.add_edge("insufficient_evidence", "finalize")
     g.add_edge("finalize", END)
     return g.compile()

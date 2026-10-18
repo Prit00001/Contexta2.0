@@ -60,7 +60,9 @@ class SearchService:
         self.retriever = retriever
         self.arxiv = arxiv
         self.generator = generator
-        self.graph = build_research_graph(generator, settings.llm_max_attempts)
+        self.graph = build_research_graph(
+            generator, settings.llm_max_attempts, claim_check=settings.claim_check == "llm"
+        )
         self.research_retriever = ResearchRetriever(
             embedder=embedder, library=retriever, arxiv=arxiv, arxiv_enabled=settings.arxiv_enabled,
             arxiv_budget_s=settings.arxiv_budget_s, min_score=settings.min_score_for(embedder.backend),

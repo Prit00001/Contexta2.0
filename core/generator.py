@@ -81,9 +81,9 @@ class Generator:
         now = time.monotonic()
         return [p.name for p in self.providers if self._cooldown_until.get(p.name, 0) <= now]
 
-    async def generate(self, question: str, sources: list[dict], feedback: str | None = None) -> GenResult:
+    async def _first_answer(self, messages: list) -> tuple[str | None, ProviderSpec | None, list[str]]:
+        """Try providers in order (skipping ones on cooldown); the first non-empty answer wins."""
         warnings: list[str] = []
-        messages = build_prompt_messages(question, sources, feedback)
         for p in self.providers:
             if self._cooldown_until.get(p.name, 0) > time.monotonic():
                 warnings.append(f"{p.name} is cooling down")
@@ -120,6 +120,17 @@ class Generator:
                     "duration_ms": round((time.perf_counter() - t0) * 1000),
                 },
             )
-            text, removed = strip_invalid_markers(text, len(sources))  # drop hallucinated citation numbers
-            return GenResult(text, p.name, p.model, True, warnings, removed)
-        return GenResult(extractive_answer(question, sources), "none", "extractive", False, warnings)
+            return text, p, warnings
+        return None, None, warnings
+
+    async def generate(self, question: str, sources: list[dict], feedback: str | None = None) -> GenResult:
+        text, p, warnings = await self._first_answer(build_prompt_messages(question, sources, feedback))
+        if p is None:
+            return GenResult(extractive_answer(question, sources), "none", "extractive", False, warnings)
+        text, removed = strip_invalid_markers(text, len(sources))  # drop hallucinated citation numbers
+        return GenResult(text, p.name, p.model, True, warnings, removed)
+
+    async def judge(self, messages: list) -> tuple[str | None, list[str]]:
+        """Free-form call through the same chain and cooldowns (used by core.claim_support)."""
+        text, _, warnings = await self._first_answer(messages)
+        return text, warnings
