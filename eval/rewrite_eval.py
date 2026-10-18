@@ -35,7 +35,15 @@ import time
 from pathlib import Path
 
 import httpx
-from run_eval import _mean, ndcg_at_k, recall_at_k, reciprocal_rank
+from run_eval import (
+    RATE_LIMIT_RETRIES,
+    _mean,
+    hit_rate_limit,
+    ndcg_at_k,
+    recall_at_k,
+    reciprocal_rank,
+    wait_for_provider,
+)
 
 from app.config import get_settings
 from core.embeddings import Embedder
@@ -207,9 +215,15 @@ async def _plan(q: dict, mode: str, rankers: _Rankers, rewriter, settings, cache
         if cache is not None and key in cache:
             plan["rewrites"], plan["rewrite_ms"] = cache[key]["rewrites"], cache[key]["ms"]
         else:
-            t0 = time.perf_counter()
-            plan["rewrites"], plan["diagnostics"] = await rewrite_question(question, mode, rewriter.complete)
-            plan["rewrite_ms"] = (time.perf_counter() - t0) * 1000
+            for attempt in range(RATE_LIMIT_RETRIES + 1):
+                await wait_for_provider(rewriter)
+                t0 = time.perf_counter()
+                plan["rewrites"], plan["diagnostics"] = await rewrite_question(question, mode, rewriter.complete)
+                plan["rewrite_ms"] = (time.perf_counter() - t0) * 1000
+                plan["rate_limit_retries"] = attempt
+                if plan["rewrites"] is not None or not hit_rate_limit(plan["diagnostics"]):
+                    break
+            plan["rate_limited_final"] = plan["rewrites"] is None and hit_rate_limit(plan["diagnostics"])
             plan["fresh_call"] = True
             if cache is not None and plan["rewrites"] is not None:  # never cache a failure
                 cache[key] = {"rewrites": plan["rewrites"], "ms": round(plan["rewrite_ms"], 1)}
@@ -237,6 +251,7 @@ async def _score(q: dict, plan: dict, kind: str, rankers: _Rankers, embedder, do
         "llm_calls": plan["llm_calls"],
         "rewrite_ms": round(plan["rewrite_ms"], 1),
         "rewrite_failed": plan["llm_calls"] == 1 and plan["rewrites"] is None,
+        "rate_limited_final": plan.get("rate_limited_final", False),
         "diagnostics": plan["diagnostics"],
         "ranked": ranked,
     }
@@ -280,6 +295,7 @@ def _summarize(rows: list[dict], decoys: bool = False) -> dict:
         "llm_calls": sum(r["llm_calls"] for r in rows),
         "llm_calls_per_question": round(sum(r["llm_calls"] for r in rows) / len(rows), 3) if rows else 0.0,
         "rewrite_failures": sum(1 for r in rows if r["rewrite_failed"]),
+        "still_rate_limited": sum(1 for r in rows if r.get("rate_limited_final")),  # must be 0 for a valid run
         "rewrite_ms_p50": _pct(rewrite_ms, 0.5),
         "rewrite_ms_p95": _pct(rewrite_ms, 0.95),
         "abstain_unanswerable": round(sum(r["abstained"] for r in unanswerable) / len(unanswerable), 4)

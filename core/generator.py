@@ -81,6 +81,13 @@ class Generator:
         now = time.monotonic()
         return [p.name for p in self.providers if self._cooldown_until.get(p.name, 0) <= now]
 
+    def seconds_until_available(self) -> float:
+        """0 if a provider can be tried now, else how long until the first cooldown ends."""
+        if not self.providers:
+            return 0.0
+        now = time.monotonic()
+        return max(0.0, min(self._cooldown_until.get(p.name, 0) - now for p in self.providers))
+
     async def _first_answer(self, messages: list) -> tuple[str | None, ProviderSpec | None, list[str]]:
         """Try providers in order (skipping ones on cooldown); the first non-empty answer wins."""
         warnings: list[str] = []

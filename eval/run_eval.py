@@ -48,6 +48,24 @@ ROOT = Path(__file__).resolve().parent
 DATASET = ROOT / "dataset" / "questions.jsonl"
 
 
+RATE_LIMIT_RETRIES = 4
+_RATE_LIMITED = ("rate limited", "cooling down")
+
+
+def hit_rate_limit(diagnostics: list[str]) -> bool:
+    return any(marker in d for d in diagnostics for marker in _RATE_LIMITED)
+
+
+async def wait_for_provider(generator) -> float:
+    """Eval-only patience: sleep out provider cooldowns instead of letting questions fail instantly.
+    Production keeps skipping a cooling-down provider (core.generator); an eval must not, or a single
+    free-tier 429 turns the next minute of questions into instant fallbacks (EVALUATION_REPORT 5e)."""
+    waited = getattr(generator, "seconds_until_available", lambda: 0.0)()  # test doubles may lack it
+    if waited:
+        await asyncio.sleep(waited + 0.5)
+    return waited
+
+
 def load_questions(path: Path = DATASET, limit: Optional[int] = None) -> list[dict]:
     items = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     return items[:limit] if limit else items
@@ -247,9 +265,15 @@ async def run_answers(questions: list[dict], pace: float = 0.0) -> list[dict]:
         for i, q in enumerate(questions):
             if pace and i:
                 await asyncio.sleep(pace)  # stay under free-tier rate limits (--pace)
-            t0 = time.perf_counter()
-            state = await run_research(graph, retriever, q["question"], 5, options={"use_arxiv": False})
-            total_ms = (time.perf_counter() - t0) * 1000
+            rate_limit_retries = 0
+            while True:
+                await wait_for_provider(generator)
+                t0 = time.perf_counter()
+                state = await run_research(graph, retriever, q["question"], 5, options={"use_arxiv": False})
+                total_ms = (time.perf_counter() - t0) * 1000
+                if not hit_rate_limit(state.get("diagnostics", [])) or rate_limit_retries >= RATE_LIMIT_RETRIES:
+                    break
+                rate_limit_retries += 1  # a 429 decided this outcome, not the model: ask again after cooldown
             gold = set(q.get("gold_document_ids", []))
             citation_report = state.get("citation_report")
             cited_doc_ids = {
@@ -274,6 +298,8 @@ async def run_answers(questions: list[dict], pace: float = 0.0) -> list[dict]:
                         state.get("outcome") == "insufficient_evidence" if q["type"] == "unanswerable" else None
                     ),
                     "claim_rows": claim_rows(q, state) if settings.claim_check == "llm" else [],
+                    "rate_limit_retries": rate_limit_retries,
+                    "rate_limited_final": hit_rate_limit(state.get("diagnostics", [])),
                 }
             )
         return results
@@ -302,6 +328,8 @@ def summarize_answers(results: list[dict]) -> dict:
         "latency_p50_ms": pct(0.50),
         "latency_p95_ms": pct(0.95),
         "providers_used": sorted({r["provider"] for r in results if r.get("provider")}),
+        "rate_limit_retries": sum(r.get("rate_limit_retries", 0) for r in results),
+        "still_rate_limited": sum(1 for r in results if r.get("rate_limited_final")),
     }
 
 
@@ -331,6 +359,8 @@ def write_markdown(report: dict, path: Path) -> None:
             f"- Abstention correctness on unanswerable (n={a['n_unanswerable']}): {a['abstention_correctness']}",
             f"- Latency p50/p95: {a['latency_p50_ms']}ms / {a['latency_p95_ms']}ms",
             f"- Providers used: {', '.join(a['providers_used']) or 'none'}",
+            f"- Rate-limit retries: {a.get('rate_limit_retries', 0)}; questions still rate-limited: "
+            f"{a.get('still_rate_limited', 0)} (should be 0 for a valid run)",
         ]
     path.write_text("\n".join(lines) + "\n")
 
