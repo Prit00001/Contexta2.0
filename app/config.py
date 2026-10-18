@@ -57,6 +57,11 @@ class Settings(BaseModel):
     cache_dir: Path = Path(".cache")
     model_cache_dir: Optional[str] = None
     min_score: float = Field(0.2, ge=-1.0, le=1.0)
+    hybrid_bm25_enabled: bool = False  # P2-FR-03: off by default - see EVALUATION_REPORT.md for why
+    # the measured improvement doesn't yet justify flipping the real default (it only covers
+    # local-only retrieval; arXiv-mixed retrieval, the actual default path, is structurally
+    # biased against arXiv results by this fusion and wasn't validated). Set
+    # HYBRID_BM25_ENABLED=true for local-only deployments where it was actually measured.
 
     # LLM
     providers: tuple[ProviderSpec, ...] = ()

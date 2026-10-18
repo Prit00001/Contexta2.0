@@ -191,6 +191,7 @@ numpy==2.4.6 ; python_full_version < '3.12'
     #   faiss-cpu
     #   fastembed
     #   onnxruntime
+    #   rank-bm25
 numpy==2.5.4 ; python_full_version >= '3.12'
     # via
     #   -c requirements.txt
@@ -198,6 +199,7 @@ numpy==2.5.4 ; python_full_version >= '3.12'
     #   faiss-cpu
     #   fastembed
     #   onnxruntime
+    #   rank-bm25
 onnxruntime==1.31.0
     # via
     #   -c requirements.txt
@@ -305,6 +307,10 @@ pyyaml==6.0.3
     #   -c requirements.txt
     #   huggingface-hub
     #   langchain-core
+rank-bm25==0.2.2
+    # via
+    #   -c requirements.txt
+    #   -r requirements.in
 redis==5.3.1
     # via
     #   -c requirements.txt

@@ -57,6 +57,7 @@ class SearchService:
         self.research_retriever = ResearchRetriever(
             embedder=embedder, library=retriever, arxiv=arxiv, arxiv_enabled=settings.arxiv_enabled,
             arxiv_budget_s=settings.arxiv_budget_s, min_score=settings.min_score,
+            hybrid_bm25_enabled=settings.hybrid_bm25_enabled,
         )  # fmt: skip
         self._answers: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
         # Per-instance cache of PDF chunk embeddings, so follow-up questions on the same

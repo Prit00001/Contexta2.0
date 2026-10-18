@@ -49,6 +49,21 @@ def _dedupe_key(s: dict) -> str:
     return f"arxiv:{m.group(1)}" if m else re.sub(r"\W+", "", str(s.get("title", "")).lower())
 
 
+def rrf_fuse(rankings: list[list[dict]], k: int = 60) -> list[dict]:
+    """Reciprocal Rank Fusion (P2-FR-03): combines rankings by position, not raw score, so a
+    cosine-based ranking and a BM25-based ranking (different, incomparable scales) fuse cleanly.
+    An item missing from one ranking simply gets no contribution from it, not a penalty rank."""
+    rrf_scores: dict[str, float] = {}
+    items: dict[str, dict] = {}
+    for ranking in rankings:
+        for pos, item in enumerate(ranking, start=1):
+            key = _dedupe_key(item)
+            rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (k + pos)
+            items.setdefault(key, item)
+    fused = [{**items[key], "score": s} for key, s in rrf_scores.items()]
+    return sorted(fused, key=lambda x: x["score"], reverse=True)
+
+
 def rank(candidates: list[tuple[dict, float]], question: str) -> list[dict]:
     terms = set(keywords(question, 8))
     best: dict[str, dict] = {}
@@ -92,6 +107,7 @@ class ResearchRetriever(_AsyncOnlyRetriever):
     arxiv_enabled: bool = True
     arxiv_budget_s: float = 9.0
     min_score: float = 0.2
+    hybrid_bm25_enabled: bool = False  # P2-FR-03
 
     async def _arxiv_candidates(self, question: str, qvec: np.ndarray) -> list[tuple[dict, float]]:
         papers = await self.arxiv.search(question)
@@ -117,7 +133,18 @@ class ResearchRetriever(_AsyncOnlyRetriever):
                 )
                 warnings.append(ARXIV_UNAVAILABLE)
         t_arxiv = time.perf_counter()
-        ranked = [s for s in rank(candidates, question) if s["score"] >= self.min_score][:top_k]
+        hybrid_ranked = [s for s in rank(candidates, question) if s["score"] >= self.min_score]
+        if self.hybrid_bm25_enabled and hybrid_ranked:
+            # BM25 only *re-ranks* candidates that already passed the dense quality gate above -
+            # it never admits a candidate the dense signal rejected (a weak keyword match like
+            # common-word overlap must not resurrect something min_score correctly filtered out).
+            # ADR-003.
+            passed_keys = {_dedupe_key(s) for s in hybrid_ranked}
+            bm25_hits = self.library.bm25_search(question, top_k * 2)
+            bm25_ranked = [{**d, "score": s} for d, s in bm25_hits if _dedupe_key(d) in passed_keys]
+            ranked = rrf_fuse([hybrid_ranked, bm25_ranked])[:top_k]
+        else:
+            ranked = hybrid_ranked[:top_k]
         return RetrievalResult(
             sources=[normalize_source(s) for s in ranked],
             warnings=warnings,

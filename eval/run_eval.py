@@ -69,7 +69,7 @@ def ndcg_at_k(ranked_ids: list[str], gold: set[str], k: int) -> float:
     return dcg / idcg if idcg > 0 else 0.0
 
 
-async def run_retrieval(questions: list[dict], top_k: int = 10) -> list[dict]:
+async def run_retrieval(questions: list[dict], top_k: int = 10, hybrid_bm25: bool = False) -> list[dict]:
     settings = get_settings()
     embedder = Embedder(settings.embed_backend, settings.embed_model, settings.model_cache_dir)
     library = Retriever(embedder, settings.cache_dir / "embeddings.npz")
@@ -77,6 +77,7 @@ async def run_retrieval(questions: list[dict], top_k: int = 10) -> list[dict]:
     retriever = ResearchRetriever(
         embedder=embedder, library=library, arxiv=None, arxiv_enabled=False,
         arxiv_budget_s=settings.arxiv_budget_s, min_score=0.0,  # score the full ranking, not just >= MIN_SCORE
+        hybrid_bm25_enabled=hybrid_bm25,
     )  # fmt: skip
 
     results = []
@@ -242,7 +243,7 @@ def write_markdown(report: dict, path: Path) -> None:
 
 async def main_async(args: argparse.Namespace) -> None:
     questions = load_questions(limit=args.limit)
-    retrieval_results = await run_retrieval(questions, top_k=args.top_k)
+    retrieval_results = await run_retrieval(questions, top_k=args.top_k, hybrid_bm25=args.hybrid_bm25)
     report: dict = {
         "n_questions": len(questions),
         "retrieval": summarize_retrieval(retrieval_results),
@@ -265,6 +266,7 @@ async def main_async(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--with-llm", action="store_true", help="also run answer-quality metrics (real API calls)")
+    parser.add_argument("--hybrid-bm25", action="store_true", help="RRF-fuse a BM25 ranking in (P2-FR-03)")
     parser.add_argument("--top-k", type=int, default=10, help="retrieval depth to score against (default 10)")
     parser.add_argument("--limit", type=int, default=None, help="only run the first N questions (smoke runs)")
     args = parser.parse_args()

@@ -64,6 +64,13 @@ Not yet measured — requires `--with-llm` (see §4). Retrieval-only latency per
 separately reported in this run; `eval/run_eval.py` records per-question `latency_ms` in
 `retrieval_detail` within `report.json` for a future pass.
 
+## 5a. P2-FR-03 — hybrid BM25 retrieval (2026-10-18)
+
+Flag-gated (`HYBRID_BM25_ENABLED`, **off by default**) - see [ADR-003](../decisions/ADR-003-hybrid-retrieval.md)
+for the full before/after table and why it isn't the default despite a clean local-only result
+(the eval harness doesn't cover the arXiv-mixed path, which is the real default behavior, and the
+one test that does cover it caught a structural bias against arXiv results).
+
 ## 6. Known limitations of this dataset
 
 - Unreviewed (see §1) — treat as provisional.
