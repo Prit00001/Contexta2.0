@@ -77,3 +77,10 @@ def test_markers_after_punctuation_stay_with_their_sentence():
 def test_paragraphs_split_into_claims():
     claims = split_claims("Para one [1].\n\nPara two [2].")
     assert len(claims) == 2 and all(c["status"] == "cited" for c in claims)
+
+
+def test_fullwidth_brackets_are_citations():
+    # verbatim gpt-oss-120b output (eval q003): 【1】 was missed, so a cited answer looked uncited
+    report = validate_citations("GPT‑3 is a 175‑billion‑parameter autoregressive language model【1】.", [{"id": "a"}])
+    assert report.valid_markers == 1 and report.answer.endswith("model[1].")
+    assert normalise_markers("x ［2］ y【１，３】") == "x [2] y[1][3]"

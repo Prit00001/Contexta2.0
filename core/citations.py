@@ -22,12 +22,17 @@ from core.text import split_sentences
 
 _GROUP = re.compile(r"\[(\s*\d+(?:\s*[,;]\s*\d+)+\s*)\]")  # [1, 2] / [1;3]
 _MARKER = re.compile(r"\[(\d+)\]")
+_WIDE = re.compile(r"[【［]\s*([0-9０-９]+(?:\s*[,;，、]\s*[0-9０-９]+)*)\s*[】］]")
+_FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９，、", "0123456789,,")
 _MARKERS_AFTER_PUNCT = re.compile(r"([.!?])((?:\s*\[\d+\])+)")
 _SPACE_BEFORE_PUNCT = re.compile(r"\s+([.,;:!?])")
 
 
 def normalise_markers(text: str) -> str:
-    """Rewrite grouped markers like ``[1, 3]`` as ``[1][3]`` (the format the UI links)."""
+    """Rewrite grouped markers like ``[1, 3]`` as ``[1][3]`` (the format the UI links), and full-width
+    brackets ``【1】`` / ``［1］`` as ``[1]``: gpt-oss-120b cites that way, and the markers were missed,
+    so correctly cited answers were rejected as uncited (EVALUATION_REPORT 5e)."""
+    text = _WIDE.sub(lambda m: f"[{m.group(1).translate(_FULLWIDTH_DIGITS)}]", text)
     return _GROUP.sub(lambda m: "".join(f"[{n.strip()}]" for n in re.split(r"[,;]", m.group(1))), text)
 
 
