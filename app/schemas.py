@@ -94,6 +94,9 @@ class AskResponse(BaseModel):
     claims: list[ClaimOut] = []
     citation_check: CitationCheck = CitationCheck()
     workflow: list[WorkflowStep] = []
+    query_rewrites: list[str] = Field(
+        [], description="Search queries the rewriter produced (QUERY_REWRITE != off); empty if none were used"
+    )
 
 
 ASK_RESPONSE_EXAMPLE = {
@@ -213,6 +216,9 @@ class WorkspaceAskResponse(BaseModel):
     claims: list[ClaimOut] = []
     citation_check: CitationCheck = CitationCheck()
     workflow: list[WorkflowStep] = []
+    query_rewrites: list[str] = Field(
+        [], description="Search queries the rewriter produced (QUERY_REWRITE != off); empty if none were used"
+    )
 
 
 # ---- Workspace bootstrap, membership, API keys (Phase 1d) ----

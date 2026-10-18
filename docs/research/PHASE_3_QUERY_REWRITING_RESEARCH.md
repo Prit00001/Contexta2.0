@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Preliminary (Phase 1 deliverable; nothing here is implemented) |
+| Status | Conditions 1–6 implemented behind `QUERY_REWRITE` / `REWRITE_PROVIDERS` (2026-10-18, [ADR-004](../decisions/ADR-004-query-rewriting.md)); **no hypothesis tested yet** — needs `eval/run_eval.py --rewrite all` with a real LLM |
 | Date | 2026-10-16 |
 | Method | Publication details verified on ACL Anthology / arXiv; papers read via their PDFs or HTML versions; summaries are paraphrased |
 

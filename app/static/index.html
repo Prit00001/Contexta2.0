@@ -619,6 +619,7 @@
         `<p class="status">${esc(status)}</p>` +
         `<div class="answer">${d.claims && d.claims.length ? renderClaims(d) : renderAnswer(d.answer, d.sources)}</div>` +
         evidenceSummary(d) +
+        ((d.query_rewrites || []).length ? `<p class="evidence">Also searched for: ${d.query_rewrites.map((q) => '“' + esc(q) + '”').join(', ')}</p>` : '') +
         (d.warnings || []).map((w) => `<p class="note">${esc(w)}</p>`).join('') +
         (sources ? `<h2>Sources</h2><ol class="srcs">${sources}</ol>` : '');
     }

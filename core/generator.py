@@ -130,7 +130,7 @@ class Generator:
         text, removed = strip_invalid_markers(text, len(sources))  # drop hallucinated citation numbers
         return GenResult(text, p.name, p.model, True, warnings, removed)
 
-    async def judge(self, messages: list) -> tuple[str | None, list[str]]:
-        """Free-form call through the same chain and cooldowns (used by core.claim_support)."""
+    async def complete(self, messages: list) -> tuple[str | None, list[str]]:
+        """Free-form call through the same chain and cooldowns (claim check, query rewriting)."""
         text, _, warnings = await self._first_answer(messages)
         return text, warnings

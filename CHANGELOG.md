@@ -2,6 +2,18 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Phase 3 (query rewriting)
+
+### Added
+- `QUERY_REWRITE = off | single | multi | decompose | selective` (default `off`): the research brief's rewriting conditions as a `rewrite` node in the LangGraph workflow; at most one LLM call per request; original query kept and RRF-fused except in `single`; rewrites never query arXiv; failed rewrites fall back to the original question ([ADR-004](docs/decisions/ADR-004-query-rewriting.md)).
+- `REWRITE_PROVIDERS`: a separate provider chain for rewriting (local Ollama vs hosted, condition 6). `REWRITE_GAP_SCORE` for `selective` (uncalibrated).
+- `query_rewrites` in `/ask`, `/ask-pdf` and workspace responses; "Also searched for" line in the UI.
+- `eval/run_eval.py --rewrite all|<modes>` (`eval/rewrite_eval.py`): per-condition retrieval metrics, LLM calls, rewrite latency, abstention, similarity-to-gold delta.
+- `scripts/fake_llm_server.py` answers rewrite prompts deterministically, for offline demos.
+
+### Changed
+- `Generator.judge` renamed `Generator.complete` (shared by claim checking and rewriting).
+
 ## [Unreleased] — Phase 2
 
 ### Added

@@ -12,6 +12,7 @@ distribution, cost/latency) need a real LLM call per question and are opt-in:
     python eval/run_eval.py --with-llm                    # + answer-quality + cost (real API calls)
     python eval/run_eval.py --with-llm --limit 10          # quick smoke run
     python eval/run_eval.py --sweep-min-score             # MIN_SCORE calibration curve, offline
+    python eval/run_eval.py --rewrite all                 # Phase 3 query-rewrite conditions (LLM calls)
 
 Scoped to the local 25-paper library only (arxiv_snapshot.jsonl is not yet populated - see
 eval/dataset/ARXIV_SNAPSHOT.md); every dataset question's gold_document_ids are local doc_0XX IDs.
@@ -316,6 +317,16 @@ def write_markdown(report: dict, path: Path) -> None:
 
 async def main_async(args: argparse.Namespace) -> None:
     questions = load_questions(limit=args.limit)
+    if args.rewrite:
+        from rewrite_eval import markdown_table, parse_modes, run_rewrite_comparison
+
+        report = await run_rewrite_comparison(questions, parse_modes(args.rewrite))
+        out = ROOT / "rewrite_report.json"
+        out.write_text(json.dumps(report, indent=2, default=str))
+        (ROOT / "rewrite_report.md").write_text(markdown_table(report) + "\n")
+        print(markdown_table(report))
+        print(f"\nWrote {out} and {ROOT / 'rewrite_report.md'}")
+        return
     if args.sweep_min_score:
         sweep = await run_score_sweep(questions, hybrid_bm25=args.hybrid_bm25)
         out = ROOT / f"min_score_sweep_{sweep['embedding_backend']}.json"
@@ -356,6 +367,12 @@ def main() -> None:
     parser.add_argument("--hybrid-bm25", action="store_true", help="RRF-fuse a BM25 ranking in (P2-FR-03)")
     parser.add_argument(
         "--sweep-min-score", action="store_true", help="MIN_SCORE precision/recall/abstention curve (P2-FR-01)"
+    )
+    parser.add_argument(
+        "--rewrite",
+        metavar="MODES",
+        help="Phase 3: compare query-rewrite conditions (comma list of off,single,multi,decompose,selective "
+        "or 'all'); one real LLM call per question per condition",
     )
     parser.add_argument("--top-k", type=int, default=10, help="retrieval depth to score against (default 10)")
     parser.add_argument("--limit", type=int, default=None, help="only run the first N questions (smoke runs)")

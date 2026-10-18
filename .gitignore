@@ -10,3 +10,5 @@ __pycache__/
 eval/report.json
 eval/report.md
 eval/min_score_sweep_*.json
+eval/rewrite_report.json
+eval/rewrite_report.md

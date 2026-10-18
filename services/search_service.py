@@ -60,8 +60,18 @@ class SearchService:
         self.retriever = retriever
         self.arxiv = arxiv
         self.generator = generator
+        rewriter = (
+            Generator(settings.rewrite_providers, generator.client, settings.llm_timeout)
+            if settings.rewrite_providers
+            else generator
+        )
         self.graph = build_research_graph(
-            generator, settings.llm_max_attempts, claim_check=settings.claim_check == "llm"
+            generator,
+            settings.llm_max_attempts,
+            claim_check=settings.claim_check == "llm",
+            rewrite_mode=settings.query_rewrite,
+            rewriter=rewriter,
+            rewrite_gap_score=settings.rewrite_gap_score,
         )
         self.research_retriever = ResearchRetriever(
             embedder=embedder, library=retriever, arxiv=arxiv, arxiv_enabled=settings.arxiv_enabled,
@@ -108,6 +118,7 @@ class SearchService:
             "claims": report.claims,
             "citation_check": report.summary(),
             "workflow": state["trace"],
+            "query_rewrites": state.get("query_rewrites", []),
         }
         timings = {
             "retrieval": state.get("retrieval_timings", {}),

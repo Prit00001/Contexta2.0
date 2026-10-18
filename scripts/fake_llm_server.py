@@ -7,6 +7,9 @@ LangChain provider call, LangGraph citation validation) runs without an API key 
     python scripts/fake_llm_server.py --port 9009
     LLM_PROVIDERS=custom LLM_BASE_URL=http://127.0.0.1:9009/v1 LLM_MODEL=fake-llm uvicorn app.main:app
 
+Query-rewrite calls (QUERY_REWRITE, core.query_rewrite) get deterministic JSON: the question's
+keywords as one query, and for decomposition one query per side of an "and"/"vs" comparison.
+
 This is a test double, not a model: it never "understands" the question.
 """
 
@@ -20,8 +23,33 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 _SOURCE = re.compile(r'<source id="(\d+)"[^>]*>\n(.*?)\n</source>', re.S)
 
 
+_STOP = set(
+    "a an and are as at be between by compare does do for from how in is it of on or the to vs versus what when "
+    "which why with".split()
+)
+
+
+def _keywords(text: str) -> str:
+    return " ".join(w for w in re.findall(r"[A-Za-z0-9-]+", text) if w.lower() not in _STOP)
+
+
+def fake_rewrite(system: str, user: str) -> str:
+    question = user.removeprefix("Question:").strip()
+    queries = [_keywords(question)]
+    if "self-contained query per part" in system:
+        parts = re.split(r"\b(?:and|vs\.?|versus)\b", question, flags=re.I)
+        if len(parts) > 1:
+            queries = [_keywords(p) for p in parts if _keywords(p)]
+    elif "three different queries" in system:
+        queries += [_keywords(question) + " method", _keywords(question) + " paper"]
+    return json.dumps({"queries": queries})
+
+
 def fake_answer(messages: list[dict]) -> str:
+    system = next((m.get("content", "") for m in messages if m.get("role") == "system"), "")
     user = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
+    if "search queries for a library of machine learning" in system:
+        return fake_rewrite(system, user)
     parts = []
     for sid, body in _SOURCE.findall(user)[:2]:
         first = re.split(r"(?<=[.!?])\s+", " ".join(body.split()))

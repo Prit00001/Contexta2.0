@@ -9,6 +9,9 @@
                  insufficient_evidence -> finalize
 
 * ``check_claims`` (P2-FR-04) exists only when ``claim_check=True`` (``CLAIM_CHECK=llm``).
+* ``rewrite`` (Phase 3, ``core.query_rewrite``) exists only when ``rewrite_mode != "off"``. In
+  ``single`` / ``multi`` / ``decompose`` it runs before ``retrieve``; in ``selective`` it runs after a
+  weak first retrieval and loops back to ``retrieve`` once (``rewritten`` bounds the loop).
 
 * Conditional edges exist only where the next step genuinely depends on the result.
 * Generation is bounded by ``LLM_MAX_ATTEMPTS`` (1-3) and the graph by a recursion limit.
@@ -19,6 +22,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import operator
 import time
@@ -32,6 +36,8 @@ from core.citations import validate_citations
 from core.claim_support import check_claims as run_claim_check
 from core.generator import Generator, extractive_answer
 from core.prompts import RETRY_FEEDBACK
+from core.query_rewrite import MODES as REWRITE_MODES
+from core.query_rewrite import fuse, retrieval_queries, rewrite_question
 
 log = logging.getLogger("contexta.workflow")
 
@@ -60,6 +66,10 @@ class ResearchState(TypedDict, total=False):
     llm_used: bool
     attempts: int
     removed_markers: list[int]
+    # query rewriting (Phase 3)
+    queries: list[str]  # what retrieve searches with, original first (absent = the question only)
+    query_rewrites: list[str]  # the rewriter's queries, reported in the response
+    rewritten: bool
     fallback_answer: Optional[str]
     citation_report: Any  # core.citations.CitationReport
     # outcome
@@ -102,8 +112,19 @@ def _traced(stage: str):
     return wrap
 
 
-def build_research_graph(generator: Generator, max_attempts: int = 2, claim_check: bool = False):
+def build_research_graph(
+    generator: Generator,
+    max_attempts: int = 2,
+    claim_check: bool = False,
+    rewrite_mode: str = "off",
+    rewriter: Generator | None = None,
+    rewrite_gap_score: float = 0.35,
+):
+    if rewrite_mode not in REWRITE_MODES:
+        raise ValueError(f"unknown rewrite mode {rewrite_mode!r}")
     max_attempts = max(1, min(int(max_attempts), 3))
+    rewriter = rewriter or generator  # REWRITE_PROVIDERS may point rewriting at another chain (e.g. Ollama)
+    rewrite_first = rewrite_mode in ("single", "multi", "decompose")
     answered_next = "check_claims" if claim_check else "finalize"
 
     @_traced("validate_request")
@@ -126,11 +147,47 @@ def build_research_graph(generator: Generator, max_attempts: int = 2, claim_chec
             }, "invalid"
         return {"question": question, "attempts": 0, "removed_markers": []}, "ok"
 
+    @_traced("rewrite")
+    async def rewrite(state: ResearchState, config: RunnableConfig):
+        rewrites, diagnostics = await rewrite_question(state["question"], rewrite_mode, rewriter.complete)
+        update = {
+            "rewritten": True,
+            "diagnostics": diagnostics,
+            "query_rewrites": rewrites or [],
+            "queries": retrieval_queries(state["question"], rewrites, rewrite_mode),
+        }
+        if rewrites is None:
+            update["_category"] = "llm_unavailable"
+            return update, "failed"
+        return update, "ok"
+
+    async def _retrieve_all(retriever, state: ResearchState):
+        question, options = state["question"], state.get("options", {})
+        queries = state.get("queries") or [question]
+        if queries == [question]:
+            return await retriever.aretrieve(question, state["top_k"], **options)
+
+        # Rewrites search the local index only; live arXiv is queried for the original question
+        # alone, so rewriting never multiplies calls to an external API.
+        def opts(q: str) -> dict:
+            return options if q == question else {**options, "use_arxiv": False}
+
+        results = await asyncio.gather(*(retriever.aretrieve(q, state["top_k"], **opts(q)) for q in queries))
+        timings: dict[str, int] = {}
+        for r in results:
+            for k, v in r.timings_ms.items():
+                timings[k] = timings.get(k, 0) + v
+        result = results[0]
+        result.sources = fuse([r.sources for r in results], state["top_k"])
+        result.warnings = list(dict.fromkeys(w for r in results for w in r.warnings))
+        result.timings_ms = timings
+        return result
+
     @_traced("retrieve")
     async def retrieve(state: ResearchState, config: RunnableConfig):
         retriever = config["configurable"]["retriever"]
         try:
-            result = await retriever.aretrieve(state["question"], state["top_k"], **state.get("options", {}))
+            result = await _retrieve_all(retriever, state)
         except Exception as exc:  # noqa: BLE001 - explicit error state instead of an unhandled 500
             log.exception("retrieval failed")
             return {
@@ -210,7 +267,7 @@ def build_research_graph(generator: Generator, max_attempts: int = 2, claim_chec
     @_traced("check_claims")
     async def check_claims(state: ResearchState, config: RunnableConfig):
         report = state["citation_report"]
-        status, diagnostics = await run_claim_check(report, state["sources"], generator.judge)
+        status, diagnostics = await run_claim_check(report, state["sources"], generator.complete)
         update = {"citation_report": report, "diagnostics": diagnostics}
         if status != "ok":
             update["_category"] = "llm_unavailable" if status == "judge_unavailable" else "llm_invalid_output"
@@ -222,11 +279,19 @@ def build_research_graph(generator: Generator, max_attempts: int = 2, claim_chec
         return {"outcome": outcome}, outcome
 
     def after_validate_request(state: ResearchState) -> str:
-        return "finalize" if state.get("outcome") == "error" else "retrieve"
+        if state.get("outcome") == "error":
+            return "finalize"
+        return "rewrite" if rewrite_first else "retrieve"
+
+    def retrieval_is_weak(state: ResearchState) -> bool:
+        sources = state.get("sources") or []
+        return not sources or max(s["score"] for s in sources) < rewrite_gap_score
 
     def after_retrieve(state: ResearchState) -> str:
         if state.get("outcome") == "error":
             return "finalize"
+        if rewrite_mode == "selective" and not state.get("rewritten") and retrieval_is_weak(state):
+            return "rewrite"
         return "generate" if state.get("sources") else "insufficient_evidence"
 
     def after_generate(state: ResearchState) -> str:
@@ -240,11 +305,22 @@ def build_research_graph(generator: Generator, max_attempts: int = 2, claim_chec
 
     g = StateGraph(ResearchState)
     nodes = [validate_request, retrieve, generate, validate_answer, fallback, insufficient_evidence, finalize]
-    for node in nodes + ([check_claims] if claim_check else []):
+    if claim_check:
+        nodes.append(check_claims)
+    if rewrite_mode != "off":
+        nodes.append(rewrite)
+    for node in nodes:
         g.add_node(node.__name__, node)
     g.add_edge(START, "validate_request")
-    g.add_conditional_edges("validate_request", after_validate_request, ["retrieve", "finalize"])
-    g.add_conditional_edges("retrieve", after_retrieve, ["generate", "insufficient_evidence", "finalize"])
+    g.add_conditional_edges(
+        "validate_request", after_validate_request, ["rewrite" if rewrite_first else "retrieve", "finalize"]
+    )
+    after_retrieve_targets = ["generate", "insufficient_evidence", "finalize"]
+    if rewrite_mode == "selective":
+        after_retrieve_targets.append("rewrite")
+    g.add_conditional_edges("retrieve", after_retrieve, after_retrieve_targets)
+    if rewrite_mode != "off":
+        g.add_edge("rewrite", "retrieve")
     g.add_conditional_edges("generate", after_generate, ["validate_answer", "fallback"])
     g.add_conditional_edges("validate_answer", after_validate_answer, [answered_next, "generate", "fallback"])
     g.add_edge("fallback", answered_next)

@@ -76,6 +76,10 @@ class Settings(BaseModel):
     llm_max_attempts: int = Field(2, ge=1, le=3)
     require_llm: bool = False
     claim_check: Literal["off", "llm"] = "off"  # P2-FR-04: LLM-judge claim support (core.claim_support)
+    # Phase 3 query rewriting (core.query_rewrite); off = the measured baseline
+    query_rewrite: Literal["off", "single", "multi", "decompose", "selective"] = "off"
+    rewrite_providers: tuple[ProviderSpec, ...] = ()  # empty: rewrite with the main provider chain
+    rewrite_gap_score: float = Field(0.35, ge=-1.0, le=1.0)  # selective: rewrite when top score is below this
 
     # arXiv
     arxiv_enabled: bool = True
@@ -192,7 +196,7 @@ def load_settings() -> Settings:
     """Build Settings from the environment. Raises ConfigError on invalid configuration."""
     raw: dict[str, object] = {}
     for name in Settings.model_fields:
-        if name in ("providers", "llm_provider_order", "allowed_origins"):
+        if name in ("providers", "llm_provider_order", "allowed_origins", "rewrite_providers"):
             continue
         value = _env(_ENV_NAMES.get(name, name.upper()))
         if value is not None:
@@ -206,6 +210,16 @@ def load_settings() -> Settings:
     order = _csv(_env("LLM_PROVIDERS")) or KNOWN_PROVIDERS
     raw["llm_provider_order"] = order
     raw["providers"] = _build_providers(order, str(raw.get("site_url", "http://localhost:8000")))
+    if (rewrite_order := _csv(_env("REWRITE_PROVIDERS"))) is not None:
+        unknown = [p for p in rewrite_order if p not in KNOWN_PROVIDERS]
+        if unknown:
+            raise ConfigError(f"Invalid configuration - REWRITE_PROVIDERS: unknown provider(s) {unknown}")
+        raw["rewrite_providers"] = _build_providers(rewrite_order, str(raw.get("site_url", "http://localhost:8000")))
+        if not raw["rewrite_providers"]:
+            raise ConfigError(
+                "Invalid configuration - REWRITE_PROVIDERS: none of the listed providers is configured "
+                "(missing API key, or LLM_BASE_URL+LLM_MODEL for custom)"
+            )
     try:
         return Settings.model_validate(raw)
     except ValidationError as exc:

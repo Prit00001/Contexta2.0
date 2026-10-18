@@ -34,6 +34,14 @@ FastAPI · LangGraph · LangChain · FAISS · fastembed (all-MiniLM-L6-v2, ONNX)
 | Workspace Q&A on the graph | `/workspaces/{id}/ask` returns the same `outcome` / `claims` / `citation_check` / `workflow` as `/ask` |
 | Fast offline start | Uncached model + no network: 46 s → ~5 s before falling back to hash embeddings |
 
+### Phase 3 (experimental, off by default)
+
+| Feature | Notes |
+|---|---|
+| Query rewriting | `QUERY_REWRITE=single|multi|decompose|selective` — the research brief's conditions 1–5 as a `rewrite` node in the graph; one LLM call max, original query kept (except `single`), rewrites shown in `query_rewrites` and the UI. [ADR-004](docs/decisions/ADR-004-query-rewriting.md) |
+| Local rewriter | `REWRITE_PROVIDERS=custom` + `LLM_BASE_URL` → rewrite with a local Ollama model, answer with the hosted chain (condition 6) |
+| Comparison harness | `PYTHONPATH=. python eval/run_eval.py --rewrite all` — per-type recall/MRR/nDCG, LLM calls, rewrite latency, abstention, Δsimilarity to gold. **Not yet run with a real LLM; no condition is shown to help yet** |
+
 Not verified from the build environment (network-restricted): live arXiv, real LLM providers, the real embedding-model download, and the Docker build. See [Known limitations](#known-limitations).
 
 ## Architecture
@@ -153,6 +161,7 @@ All settings come from environment variables (or `.env`) and are validated at st
 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | – | Any OpenAI-compatible server (`custom`) |
 | `REQUIRE_LLM` | `false` | Refuse to start without a provider |
 | `LLM_MAX_ATTEMPTS` | `2` | Generation attempts per question (1–3) |
+| `QUERY_REWRITE` | `off` | Phase 3 experiment: `single` / `multi` / `decompose` / `selective` |
 | `CLAIM_CHECK` | `off` | `llm`: check cited claims against their sources (+1 LLM call per uncached answer) |
 | `MIN_SCORE` | per backend | Unset: `0.2` (MiniLM), `0.075` (hash embeddings, incl. fallback) |
 | `REDIS_URL` | – | Shared answer cache + rate limits across instances |
@@ -173,7 +182,7 @@ ruff check . && ruff format --check .
 python scripts/smoke_test.py --base-url http://127.0.0.1:8000   # against a running server
 ```
 
-Current: **208 passed** (Python 3.13, with Postgres 16 + pgvector and a local `redis-server`; without them the DB tests skip and the Redis tests skip). Phase 1 ended at 181. Details: [TEST_REPORT](docs/testing/TEST_REPORT.md) · [TEST_STRATEGY](docs/testing/TEST_STRATEGY.md).
+Current: **222 passed** (Python 3.13, with Postgres 16 + pgvector and a local `redis-server`; without them the DB tests skip and the Redis tests skip). Phase 1 ended at 181. Details: [TEST_REPORT](docs/testing/TEST_REPORT.md) · [TEST_STRATEGY](docs/testing/TEST_STRATEGY.md).
 
 ## Troubleshooting
 
@@ -200,7 +209,7 @@ Current: **208 passed** (Python 3.13, with Postgres 16 + pgvector and a local `r
 ## Roadmap
 
 - **Phase 2, still open** — answer-quality baseline with real providers (`--with-llm`, needs your keys and go-ahead), MiniLM `MIN_SCORE` sweep, measuring the claim-check judge on a labelled sample, human review of the eval set; later: reranking, streaming, React frontend: [PHASE_2_BACKLOG](docs/roadmap/PHASE_2_BACKLOG.md)
-- **Phase 3** — research-driven query rewriting and optional local inference: [research brief](docs/research/PHASE_3_QUERY_REWRITING_RESEARCH.md)
+- **Phase 3** — rewriting conditions are built ([ADR-004](docs/decisions/ADR-004-query-rewriting.md)); next: run `--rewrite all` with a real LLM, calibrate `REWRITE_GAP_SCORE`, compare a local Ollama rewriter, add the adversarial decoy subset: [research brief](docs/research/PHASE_3_QUERY_REWRITING_RESEARCH.md)
 
 ## Project layout
 
@@ -208,13 +217,13 @@ Current: **208 passed** (Python 3.13, with Postgres 16 + pgvector and a local `r
 app/        main.py (factory, lifespan) · routes.py · routes_workspace.py · routes_admin.py · deps.py
             config.py (validated settings) · schemas.py · observability.py · static/index.html
 core/       llm.py · prompts.py · lc_retriever.py · sources.py · citations.py   ← LangChain adapters
-            claim_support.py · cache.py · metrics.py
+            claim_support.py · query_rewrite.py · cache.py · metrics.py
             generator.py · retriever.py · vector_store.py · embeddings.py · text.py · pdf.py
             db.py · storage.py · parsers.py · chunking.py · auth.py · rate_limit.py
 services/   research_graph.py (LangGraph) · search_service.py · arxiv_client.py
             workspace_qa.py · retrieval.py · ingestion.py · worker.py
 data/       documents.py (paper library)
-eval/       run_eval.py · dataset/ (questions.jsonl, review sheet)
+eval/       run_eval.py · rewrite_eval.py · dataset/ (questions.jsonl, review sheet)
 scripts/    smoke_test.py · fake_llm_server.py · migrate.py
 tests/      unit · integration/ · e2e/
 docs/       requirements · architecture · decisions · implementation · testing · operations · research · roadmap
