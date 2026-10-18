@@ -198,6 +198,12 @@ class WorkspaceAskResponse(BaseModel):
     model_used: str
     llm_used: bool
     warnings: list[str] = []
+    # ---- added for P2-FR-06: same fields as AskResponse, same graph produces them ----
+    outcome: Literal["answered", "extractive_fallback", "insufficient_evidence"] = "answered"
+    citations: list[CitationOut] = []
+    claims: list[ClaimOut] = []
+    citation_check: CitationCheck = CitationCheck()
+    workflow: list[WorkflowStep] = []
 
 
 # ---- Workspace bootstrap, membership, API keys (Phase 1d) ----

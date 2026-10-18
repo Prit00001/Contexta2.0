@@ -4,6 +4,7 @@ actual API, upload+ingest+ask, prove cross-workspace isolation and role enforcem
 and exercise the API-key path (create, use without a JWT, revoke). Skipped unless
 DATABASE_URL is set.
 """
+
 from __future__ import annotations
 
 import os
@@ -53,14 +54,16 @@ def test_upload_ask_isolation_and_api_keys(tmp_path, monkeypatch):
         with TestClient(create_app()) as c:
             # Bootstrap a workspace for user A, and an unrelated one for user B, via the real API.
             r = c.post(
-                "/workspaces", json={"org_name": "Acme", "workspace_name": "Acme HQ"},
+                "/workspaces",
+                json={"org_name": "Acme", "workspace_name": "Acme HQ"},
                 headers={"Authorization": f"Bearer {token_a}"},
             )
             assert r.status_code == 200, r.text
             ws_a, org_a = r.json()["workspace_id"], r.json()["org_id"]
 
             r = c.post(
-                "/workspaces", json={"org_name": "Other Co", "workspace_name": "Other HQ"},
+                "/workspaces",
+                json={"org_name": "Other Co", "workspace_name": "Other HQ"},
                 headers={"Authorization": f"Bearer {token_b}"},
             )
             assert r.status_code == 200, r.text
@@ -73,7 +76,8 @@ def test_upload_ask_isolation_and_api_keys(tmp_path, monkeypatch):
             # Upload + ingest + ask within A's own workspace, as A.
             content = b"# Vacation Policy\nEmployees get 20 paid vacation days per year, accrued monthly."
             r = c.post(
-                f"/workspaces/{ws_a}/documents", files={"file": ("policy.md", content, "text/markdown")},
+                f"/workspaces/{ws_a}/documents",
+                files={"file": ("policy.md", content, "text/markdown")},
                 headers={"Authorization": f"Bearer {token_a}"},
             )
             assert r.status_code == 200, r.text
@@ -87,11 +91,17 @@ def test_upload_ask_isolation_and_api_keys(tmp_path, monkeypatch):
             ingest_conn.close()
 
             r = c.post(
-                f"/workspaces/{ws_a}/ask", json={"question": "How many vacation days do employees get?"},
+                f"/workspaces/{ws_a}/ask",
+                json={"question": "How many vacation days do employees get?"},
                 headers={"Authorization": f"Bearer {token_a}"},
             )
             assert r.status_code == 200, r.text
-            assert r.json()["sources"][0]["filename"] == "policy.md"
+            body = r.json()
+            assert body["sources"][0]["filename"] == "policy.md"
+            # P2-FR-06: workspace Q&A runs on the same graph as /ask - same citation fields exist.
+            assert body["outcome"] in ("answered", "extractive_fallback", "insufficient_evidence")
+            assert body["citation_check"]["verification"] == "marker_only"
+            assert [w["stage"] for w in body["workflow"]][:2] == ["validate_request", "retrieve"]
 
             # Grant B viewer access to A's workspace (bypassing the email-lookup admin endpoint,
             # which needs a real Supabase project) - a viewer can read but not upload.
@@ -100,18 +110,22 @@ def test_upload_ask_isolation_and_api_keys(tmp_path, monkeypatch):
                     "INSERT INTO memberships (user_id, workspace_id, role) VALUES (%s, %s, 'viewer')", (user_b, ws_a)
                 )
             r = c.post(
-                f"/workspaces/{ws_a}/documents", files={"file": ("x.txt", b"hi", "text/plain")},
+                f"/workspaces/{ws_a}/documents",
+                files={"file": ("x.txt", b"hi", "text/plain")},
                 headers={"Authorization": f"Bearer {token_b}"},
             )
             assert r.status_code == 403
 
             # API key: create (admin only), use it without a JWT, then revoke it.
-            r = c.post(f"/workspaces/{ws_a}/api-keys", json={"name": "ci"}, headers={"Authorization": f"Bearer {token_a}"})
+            r = c.post(
+                f"/workspaces/{ws_a}/api-keys", json={"name": "ci"}, headers={"Authorization": f"Bearer {token_a}"}
+            )
             assert r.status_code == 200, r.text
             key_id, api_key = r.json()["id"], r.json()["api_key"]
 
             r = c.post(
-                f"/workspaces/{ws_a}/ask", json={"question": "vacation days?"},
+                f"/workspaces/{ws_a}/ask",
+                json={"question": "vacation days?"},
                 headers={"Authorization": f"Bearer {api_key}"},
             )
             assert r.status_code == 200, r.text
@@ -120,14 +134,16 @@ def test_upload_ask_isolation_and_api_keys(tmp_path, monkeypatch):
             assert r.status_code == 204
 
             r = c.post(
-                f"/workspaces/{ws_a}/ask", json={"question": "vacation days?"},
+                f"/workspaces/{ws_a}/ask",
+                json={"question": "vacation days?"},
                 headers={"Authorization": f"Bearer {api_key}"},
             )
             assert r.status_code == 401
 
             # Magic-byte check: a .pdf extension whose bytes aren't a real PDF is rejected.
             r = c.post(
-                f"/workspaces/{ws_a}/documents", files={"file": ("fake.pdf", b"not a pdf", "application/pdf")},
+                f"/workspaces/{ws_a}/documents",
+                files={"file": ("fake.pdf", b"not a pdf", "application/pdf")},
                 headers={"Authorization": f"Bearer {token_a}"},
             )
             assert r.status_code == 400
@@ -143,7 +159,10 @@ def test_upload_ask_isolation_and_api_keys(tmp_path, monkeypatch):
             assert r.json()["filename"] == "escape.md"
             assert (tmp_path / ws_a / "escape.md").exists()
             assert not (tmp_path.parent / "escape.md").exists()
-            c.delete(f"/workspaces/{ws_a}/documents/{r.json()['document_id']}", headers={"Authorization": f"Bearer {token_a}"})
+            c.delete(
+                f"/workspaces/{ws_a}/documents/{r.json()['document_id']}",
+                headers={"Authorization": f"Bearer {token_a}"},
+            )
 
             c.delete(f"/workspaces/{ws_a}/documents/{doc_id}", headers={"Authorization": f"Bearer {token_a}"})
     finally:

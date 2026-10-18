@@ -3,6 +3,7 @@ answer endpoint over a workspace's own ingested chunks (as opposed to the arXiv 
 at /ask). Every route requires a Supabase JWT or workspace API key (app/deps.py),
 rate-limited via Redis/Upstash (core/rate_limit.py, in-memory fallback if unconfigured).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -48,7 +49,9 @@ async def _check_rate_limit(request: Request, workspace_id: str, ctx: AuthContex
     limiter = request.app.state.workspace_limiter
     key = f"{workspace_id}:{ctx.user_id or ctx.via}"
     if not await limiter.allow(key):
-        raise HTTPException(429, "Too many requests. Please wait a minute and try again.", headers={"Retry-After": "60"})
+        raise HTTPException(
+            429, "Too many requests. Please wait a minute and try again.", headers={"Retry-After": "60"}
+        )
 
 
 async def _allowed_group_ids(pool, ctx: AuthContext):
@@ -69,7 +72,10 @@ async def _allowed_group_ids(pool, ctx: AuthContext):
 
 @router.post("/documents", response_model=UploadResponse)
 async def upload_document(
-    workspace_id: str, request: Request, file: UploadFile = File(...), ctx: AuthContext = Depends(require_role("member"))
+    workspace_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    ctx: AuthContext = Depends(require_role("member")),
 ):
     await _check_rate_limit(request, workspace_id, ctx)
     settings = request.app.state.settings
@@ -91,8 +97,13 @@ async def upload_document(
         conn = db.get_pool_conn(pool)
         try:
             return db.upsert_document(
-                conn, workspace_id=workspace_id, filename=filename, content_type=content_type,
-                storage_path=storage_path, content_hash=content_hash, uploaded_by=ctx.user_id,
+                conn,
+                workspace_id=workspace_id,
+                filename=filename,
+                content_type=content_type,
+                storage_path=storage_path,
+                content_hash=content_hash,
+                uploaded_by=ctx.user_id,
             )
         finally:
             db.put_pool_conn(pool, conn)
@@ -130,8 +141,7 @@ async def list_documents(workspace_id: str, request: Request, ctx: AuthContext =
 
     rows = await asyncio.to_thread(_list)
     return [
-        DocumentOut(id=str(r[0]), filename=r[1], status=r[2], error=r[3], created_at=r[4].isoformat())
-        for r in rows
+        DocumentOut(id=str(r[0]), filename=r[1], status=r[2], error=r[3], created_at=r[4].isoformat()) for r in rows
     ]
 
 
@@ -165,14 +175,18 @@ async def delete_document(
 
 
 @router.post("/ask", response_model=WorkspaceAskResponse)
-async def ask(workspace_id: str, body: WorkspaceAskRequest, request: Request, ctx: AuthContext = Depends(require_role("viewer"))):
+async def ask(
+    workspace_id: str, body: WorkspaceAskRequest, request: Request, ctx: AuthContext = Depends(require_role("viewer"))
+):
     await _check_rate_limit(request, workspace_id, ctx)
     pool = request.app.state.db_pool
     st = request.app.state
     group_ids = await _allowed_group_ids(pool, ctx)
     conn = await asyncio.to_thread(db.get_pool_conn, pool)
     try:
-        result = await ask_workspace(conn, st.generator, st.embedder, workspace_id, body.question, body.top_k, group_ids)
+        result = await ask_workspace(
+            conn, st.service.graph, st.embedder, workspace_id, body.question, body.top_k, group_ids
+        )
     finally:
         await asyncio.to_thread(db.put_pool_conn, pool, conn)
     return WorkspaceAskResponse(**result)
