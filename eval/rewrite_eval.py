@@ -29,6 +29,7 @@ keyword overlap), ``hybrid_bm25`` (plus RRF-fused BM25, ADR-003), ``dense`` (cos
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import httpx
@@ -115,7 +116,11 @@ class _Rankers:
 
 
 async def run_rewrite_comparison(
-    questions: list[dict], modes: list[str], retrievers: list[str] | None = None, decoys: bool = False
+    questions: list[dict],
+    modes: list[str],
+    retrievers: list[str] | None = None,
+    decoys: bool = False,
+    pace: float = 0.0,
 ) -> dict:
     retrievers = retrievers or ["hybrid"]
     settings = get_settings()
@@ -145,7 +150,12 @@ async def run_rewrite_comparison(
     async with httpx.AsyncClient() as client:
         rewriter = Generator(specs, client, settings.llm_timeout)
         for mode in modes:
-            plans = [await _plan(q, mode, rankers, rewriter, settings) for q in questions]
+            plans = []
+            for q in questions:
+                plan = await _plan(q, mode, rankers, rewriter, settings)
+                if pace and plan["llm_calls"]:
+                    await asyncio.sleep(pace)  # stay under free-tier rate limits (--pace)
+                plans.append(plan)
             for kind in retrievers:
                 rows = [
                     await _score(q, plan, kind, rankers, embedder, doc_vecs, min_score)

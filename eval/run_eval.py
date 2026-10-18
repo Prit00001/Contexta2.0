@@ -229,7 +229,7 @@ async def run_score_sweep(questions: list[dict], hybrid_bm25: bool = False) -> d
 # ---- answer-quality metrics (--with-llm) --------------------------------------------------
 
 
-async def run_answers(questions: list[dict]) -> list[dict]:
+async def run_answers(questions: list[dict], pace: float = 0.0) -> list[dict]:
     settings = get_settings()
     embedder = Embedder(settings.embed_backend, settings.embed_model, settings.model_cache_dir)
     library = Retriever(embedder, settings.cache_dir / "embeddings.npz")
@@ -244,7 +244,9 @@ async def run_answers(questions: list[dict]) -> list[dict]:
         graph = build_research_graph(generator, settings.llm_max_attempts, claim_check=settings.claim_check == "llm")
 
         results = []
-        for q in questions:
+        for i, q in enumerate(questions):
+            if pace and i:
+                await asyncio.sleep(pace)  # stay under free-tier rate limits (--pace)
             t0 = time.perf_counter()
             state = await run_research(graph, retriever, q["question"], 5, options={"use_arxiv": False})
             total_ms = (time.perf_counter() - t0) * 1000
@@ -343,7 +345,7 @@ async def main_async(args: argparse.Namespace) -> None:
         from rewrite_eval import markdown_table, parse_modes, parse_retrievers, run_rewrite_comparison
 
         report = await run_rewrite_comparison(
-            questions, parse_modes(args.rewrite), parse_retrievers(args.retrievers), decoys=args.decoys
+            questions, parse_modes(args.rewrite), parse_retrievers(args.retrievers), decoys=args.decoys, pace=args.pace
         )
         out = ROOT / "rewrite_report.json"
         out.write_text(json.dumps(report, indent=2, default=str))
@@ -374,7 +376,7 @@ async def main_async(args: argparse.Namespace) -> None:
         "retrieval_detail": retrieval_results,
     }
     if args.with_llm:
-        answer_results = await run_answers(questions)
+        answer_results = await run_answers(questions, pace=args.pace)
         report["answers"] = summarize_answers(answer_results)
         report["answers_detail"] = answer_results
         rows = [row for r in answer_results for row in r.pop("claim_rows")]
@@ -419,6 +421,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--score-claims", metavar="CSV", help="score the claim checker against a labelled claims_to_label.csv"
+    )
+    parser.add_argument(
+        "--pace", type=float, default=0.0, help="seconds to wait between LLM-calling questions (free-tier rate limits)"
     )
     parser.add_argument("--top-k", type=int, default=10, help="retrieval depth to score against (default 10)")
     parser.add_argument("--limit", type=int, default=None, help="only run the first N questions (smoke runs)")
