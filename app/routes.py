@@ -139,7 +139,7 @@ async def ask_pdf(
     try:
         pages = await run_in_threadpool(extract_pages, data)
     except Exception:  # noqa: BLE001 - pypdf raises many types on bad input
-        raise HTTPException(422, "Couldn't read this PDF. It may be password-protected or corrupted.")
+        raise HTTPException(422, "Couldn't read this PDF. It may be password-protected or corrupted.") from None
 
     chunks = await run_in_threadpool(chunk, pages)
     if not chunks:

@@ -2,6 +2,7 @@
 project's JWT secret - no network call) or a workspace API key, then checks the caller's
 membership role for the workspace in the path. This is what closes the Phase 1c "no auth"
 gap - every /workspaces/{workspace_id}/* route now depends on require_role(...)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -67,9 +68,9 @@ def _decode_jwt(token: str, settings: Settings) -> dict:
     try:
         claims = jwt.decode(token, settings.supabase_jwt_secret, algorithms=[_JWT_ALG], audience="authenticated")
     except jwt.ExpiredSignatureError:
-        raise HTTPException(401, "Token has expired.")
+        raise HTTPException(401, "Token has expired.") from None
     except jwt.PyJWTError:
-        raise HTTPException(401, "Invalid token.")
+        raise HTTPException(401, "Invalid token.") from None
     if not claims.get("sub"):
         raise HTTPException(401, "Invalid token.")
     return claims

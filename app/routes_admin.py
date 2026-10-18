@@ -9,8 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.deps import require_role, require_user
 from app.schemas import (
-    AddMemberRequest, ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeyOut,
-    CreateWorkspaceRequest, CreateWorkspaceResponse, MemberOut,
+    AddMemberRequest,
+    ApiKeyCreateRequest,
+    ApiKeyCreateResponse,
+    ApiKeyOut,
+    CreateWorkspaceRequest,
+    CreateWorkspaceResponse,
+    MemberOut,
 )
 from core import auth, db
 

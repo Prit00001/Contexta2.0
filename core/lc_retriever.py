@@ -114,7 +114,7 @@ class ResearchRetriever(_AsyncOnlyRetriever):
         if not papers:
             return []
         vecs = await self.embedder.embed([p["text"] for p in papers])
-        return [(p, float(v @ qvec)) for p, v in zip(papers, vecs)]
+        return [(p, float(v @ qvec)) for p, v in zip(papers, vecs, strict=True)]
 
     async def aretrieve(self, question: str, top_k: int, use_arxiv: bool = True, **_: Any) -> RetrievalResult:
         warnings: list[str] = []

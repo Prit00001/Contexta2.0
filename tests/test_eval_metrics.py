@@ -51,7 +51,7 @@ def test_min_score_sweep_curve_is_monotonic():
     sweep = asyncio.run(run_score_sweep(load_questions()))  # conftest: hash embeddings, offline
     curve = sweep["curve"]
     assert curve[0]["min_score"] == 0.0 and curve[0]["false_abstention_rate"] == 0.0
-    for a, b in zip(curve, curve[1:]):  # a higher threshold never retrieves more
+    for a, b in zip(curve, curve[1:], strict=False):  # a higher threshold never retrieves more
         assert b["recall@5"] <= a["recall@5"]
         assert b["abstention_rate_unanswerable"] >= a["abstention_rate_unanswerable"]
     assert sweep["recommended_min_score"] in {c["min_score"] for c in curve}

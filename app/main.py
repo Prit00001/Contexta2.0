@@ -16,9 +16,9 @@ from app.routes import router
 from app.routes_admin import router as admin_router
 from app.routes_workspace import router as workspace_router
 from core import db
+from core.cache import make_answer_cache
 from core.embeddings import Embedder
 from core.generator import Generator
-from core.cache import make_answer_cache
 from core.rate_limit import make_limiter, make_redis
 from core.retriever import Retriever
 from data.documents import DOCUMENTS

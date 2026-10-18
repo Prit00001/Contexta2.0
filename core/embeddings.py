@@ -36,7 +36,7 @@ def _hash_embed(texts: list[str]) -> np.ndarray:
     out = np.zeros((len(texts), HASH_DIM), dtype="float32")
     for row, text in enumerate(texts):
         toks = tokenize(text)
-        for feat in toks + [f"{a}_{b}" for a, b in zip(toks, toks[1:])]:
+        for feat in toks + [f"{a}_{b}" for a, b in zip(toks, toks[1:], strict=False)]:
             h = int(hashlib.md5(feat.encode()).hexdigest(), 16)
             out[row, h % HASH_DIM] += 1.0 if (h >> 64) & 1 else -1.0
     return _normalize(out)
