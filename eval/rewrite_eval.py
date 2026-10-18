@@ -183,7 +183,7 @@ async def run_rewrite_comparison(
         for mode in modes:
             plans = []
             for q in questions:
-                plan = await _plan(q, mode, rankers, rewriter, settings, cache)
+                plan = await _plan(q, mode, rankers, rewriter, settings, cache, cache_path)
                 if pace and plan["fresh_call"]:
                     await asyncio.sleep(pace)  # stay under free-tier rate limits (--pace)
                 plans.append(plan)
@@ -198,7 +198,9 @@ async def run_rewrite_comparison(
     return report
 
 
-async def _plan(q: dict, mode: str, rankers: _Rankers, rewriter, settings, cache: dict | None = None) -> dict:
+async def _plan(
+    q: dict, mode: str, rankers: _Rankers, rewriter, settings, cache: dict | None = None, cache_path: Path | None = None
+) -> dict:
     """Decide the queries for one question under one condition - once, shared by every retriever.
     ``selective`` judges weakness on the hybrid ranking, as /ask does.
 
@@ -211,7 +213,8 @@ async def _plan(q: dict, mode: str, rankers: _Rankers, rewriter, settings, cache
     plan = {"rewrites": None, "llm_calls": 0, "rewrite_ms": 0.0, "diagnostics": [], "fresh_call": False}
 
     async def rewrite() -> None:
-        key = f"{prompt_mode(mode)}|{question}"
+        model = "+".join(s.model for s in (settings.rewrite_providers or settings.providers))
+        key = f"{model}|{prompt_mode(mode)}|{question}"  # a rewrite is only reused for the same model
         if cache is not None and key in cache:
             plan["rewrites"], plan["rewrite_ms"] = cache[key]["rewrites"], cache[key]["ms"]
         else:
@@ -227,6 +230,8 @@ async def _plan(q: dict, mode: str, rankers: _Rankers, rewriter, settings, cache
             plan["fresh_call"] = True
             if cache is not None and plan["rewrites"] is not None:  # never cache a failure
                 cache[key] = {"rewrites": plan["rewrites"], "ms": round(plan["rewrite_ms"], 1)}
+                if cache_path is not None:  # save as we go: a long run that dies keeps its rewrites
+                    cache_path.write_text(json.dumps(cache, indent=1, ensure_ascii=False))
         plan["llm_calls"] = 1
 
     if mode in ("single", "multi", "decompose"):

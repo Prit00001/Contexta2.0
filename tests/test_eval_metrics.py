@@ -174,3 +174,11 @@ def test_rewrite_cache_saves_quota_but_reports_production_cost(monkeypatch, tmp_
     for report in (first, second):
         assert report["conditions"]["multi/hybrid"]["summary"]["cost"]["llm_calls"] == 5
     assert first["conditions"]["selective/hybrid"]["summary"]["cost"]["llm_calls"] == 5
+
+
+def test_sample_spec_takes_first_n_per_type():
+    from run_eval import load_questions
+
+    qs = load_questions(sample="single_fact:2,unanswerable:3")
+    assert [q["type"] for q in qs] == ["single_fact"] * 2 + ["unanswerable"] * 3
+    assert qs[0]["id"] == load_questions()[0]["id"]

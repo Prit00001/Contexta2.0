@@ -66,8 +66,19 @@ async def wait_for_provider(generator) -> float:
     return waited
 
 
-def load_questions(path: Path = DATASET, limit: Optional[int] = None) -> list[dict]:
+def load_questions(path: Path = DATASET, limit: Optional[int] = None, sample: Optional[str] = None) -> list[dict]:
+    """``sample`` like "single_fact:3,unanswerable:33": the first N questions of each listed type
+    (deterministic), for runs that a provider's daily quota can't cover in full."""
     items = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    if sample:
+        quota = {t: int(n) for t, n in (part.split(":") for part in sample.split(",") if part.strip())}
+        taken: dict[str, int] = {}
+        picked = []
+        for q in items:
+            if taken.get(q["type"], 0) < quota.get(q["type"], 0):
+                taken[q["type"]] = taken.get(q["type"], 0) + 1
+                picked.append(q)
+        items = picked
     return items[:limit] if limit else items
 
 
@@ -370,7 +381,7 @@ async def main_async(args: argparse.Namespace) -> None:
         scores = score_sheet(Path(args.score_claims))
         print(claims_markdown(scores))
         return
-    questions = load_questions(limit=args.limit)
+    questions = load_questions(limit=args.limit, sample=args.sample)
     if args.rewrite:
         from rewrite_eval import markdown_table, parse_modes, parse_retrievers, run_rewrite_comparison
 
@@ -462,6 +473,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--pace", type=float, default=0.0, help="seconds to wait between LLM-calling questions (free-tier rate limits)"
+    )
+    parser.add_argument(
+        "--sample", metavar="SPEC", help='first N per type, e.g. "single_fact:3,unanswerable:33" (quota-limited runs)'
     )
     parser.add_argument("--top-k", type=int, default=10, help="retrieval depth to score against (default 10)")
     parser.add_argument("--limit", type=int, default=None, help="only run the first N questions (smoke runs)")
