@@ -51,6 +51,10 @@ def fake_answer(messages: list[dict]) -> str:
     user = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
     if "search queries for a library of machine learning" in system:
         return fake_rewrite(system, user)
+    if "into a standalone question" in system:  # follow-ups (core.followup): prefix the last question's topic
+        last_q = re.findall(r"^Q: (.*)$", user, re.M)[-1:] or [""]
+        followup = user.rsplit("Follow-up question:", 1)[-1].strip()
+        return json.dumps({"question": f"{_keywords(last_q[0])}: {followup}".strip(": ")})
     parts = []
     for sid, body in _SOURCE.findall(user)[:2]:
         first = re.split(r"(?<=[.!?])\s+", " ".join(body.split()))

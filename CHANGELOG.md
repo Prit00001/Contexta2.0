@@ -17,6 +17,8 @@ All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://
 - **Reranking** (P2-07), `RERANK_MODEL` (off by default): fastembed ONNX cross-encoder reorders the top `RERANK_CANDIDATES` sources that passed `MIN_SCORE`; `/ready` reports load failures; `eval/run_eval.py --rerank`, and retrieval p95 latency in the eval summary.
 - **Claim-checker measurement tooling**: `--with-llm` + `CLAIM_CHECK=llm` writes `eval/claims_to_label.csv`; `--score-claims` scores the checker against human labels.
 
+- **Follow-up questions without server-side history** (P2-14, stateless part): optional `history` (≤3 turns) on `/ask` and `/ask/stream`; `contextualize` graph node (one LLM call, merge fallback); `standalone_question` in responses; history fenced as untrusted, included in the cache key, never stored or logged. UI: in-memory turns, "New topic", "Read as" line.
+
 ### Changed
 - `Generator.judge` renamed `Generator.complete` (shared by claim checking and rewriting).
 

@@ -34,6 +34,7 @@ FastAPI · LangGraph · LangChain · FAISS · fastembed (all-MiniLM-L6-v2, ONNX)
 | Workspace Q&A on the graph | `/workspaces/{id}/ask` returns the same `outcome` / `claims` / `citation_check` / `workflow` as `/ask` |
 | Fast offline start | Uncached model + no network: 46 s → ~5 s before falling back to hash embeddings |
 | Reranking | `RERANK_MODEL=Xenova/ms-marco-MiniLM-L-6-v2` (off by default): a small cross-encoder reorders the top 20 sources; measure with `eval/run_eval.py --rerank` |
+| Follow-up questions | Send `history` (last ≤3 turns) with `/ask` or `/ask/stream`; the follow-up is rewritten into a standalone question (`standalone_question`). Nothing is stored or logged server-side; the web page keeps turns in tab memory only |
 | Streaming answers | `POST /ask/stream` (server-sent events): sources first, then answer tokens as the model writes, then the full validated `/ask` response; the web page uses it |
 
 ### Phase 3 (experimental, off by default)
@@ -150,6 +151,8 @@ Response (abridged — full example in `/docs`):
 
 With `CLAIM_CHECK=llm`, each claim also carries `support` (`supported` / `not_supported` / `unknown`) and `support_method` (`quote` / `llm_judge`), and `citation_check.verification` is `claim_support` with `supported_claims` / `not_supported_claims` / `unknown_claims` counts. Otherwise those fields are `null`.
 
+Follow-ups: add `"history": [{"question": "What is QLoRA?", "answer": "..."}]` (oldest first, at most 3) and the response includes `standalone_question`, the rewritten question that was actually searched. The server keeps no conversation state.
+
 Streaming: `POST /ask/stream` takes the same body and sends events `stage`, `sources`, `token`, `reset` (the draft failed citation validation and is being regenerated — discard it), then `done` with exactly the `/ask` response, or `error` (`status`, `detail`). Keep `done.answer`: hallucinated markers are only removed there.
 
 ```bash
@@ -190,7 +193,7 @@ ruff check . && ruff format --check .
 python scripts/smoke_test.py --base-url http://127.0.0.1:8000   # against a running server
 ```
 
-Current: **230 passed** (Python 3.13, with Postgres 16 + pgvector and a local `redis-server`; without them the DB tests skip and the Redis tests skip). Phase 1 ended at 181. Details: [TEST_REPORT](docs/testing/TEST_REPORT.md) · [TEST_STRATEGY](docs/testing/TEST_STRATEGY.md).
+Current: **241 passed** (Python 3.13, with Postgres 16 + pgvector and a local `redis-server`; without them the DB tests skip and the Redis tests skip). Phase 1 ended at 181. Details: [TEST_REPORT](docs/testing/TEST_REPORT.md) · [TEST_STRATEGY](docs/testing/TEST_STRATEGY.md).
 
 ## Troubleshooting
 

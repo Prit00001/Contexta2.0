@@ -110,7 +110,8 @@ class SearchService:
         sources = state.get("sources", [])
         report = state["citation_report"]
         response = {
-            "question": state["question"],
+            "question": state.get("followup_question") or state["question"],
+            "standalone_question": state["question"] if state.get("followup_question") else None,
             "answer": state["answer"],
             "provider": state.get("provider", "none"),
             "model_used": state.get("model", "none"),
@@ -143,35 +144,39 @@ class SearchService:
             "total": round((time.perf_counter() - t0) * 1000),
         }
 
-    def _ask_key(self, question: str, top_k: int, use_arxiv: bool) -> tuple[str, bool, tuple]:
+    def _ask_key(self, question: str, top_k: int, use_arxiv: bool, history: list[dict]) -> tuple[str, bool, tuple]:
         question = " ".join(question.split())
         use_arxiv = use_arxiv and self.s.arxiv_enabled
-        return question, use_arxiv, ("ask", question.lower(), top_k, use_arxiv)
+        turns = tuple((t["question"].lower(), t.get("answer", "")) for t in history)  # hashed in core.cache
+        return question, use_arxiv, ("ask", question.lower(), top_k, use_arxiv, turns)
 
-    async def ask(self, question: str, top_k: int, use_arxiv: bool) -> dict:
-        question, use_arxiv, key = self._ask_key(question, top_k, use_arxiv)
+    async def ask(self, question: str, top_k: int, use_arxiv: bool, history: list[dict] | None = None) -> dict:
+        history = history or []
+        question, use_arxiv, key = self._ask_key(question, top_k, use_arxiv, history)
         if hit := await self._cached(key):
             return hit
 
         t0 = time.perf_counter()
-        response, t = await self._run(
-            self.research_retriever, question, top_k, {"use_arxiv": use_arxiv}, NO_SOURCES_MSG
+        state = await run_research(
+            self.graph, self.research_retriever, question, top_k, {"use_arxiv": use_arxiv}, NO_SOURCES_MSG, history
         )
+        response, t = self._response(state)
         response["timings_ms"] = self._ask_timings(t, t0)
         await self._store(key, response)
         return response
 
-    async def ask_stream(self, question: str, top_k: int, use_arxiv: bool):
+    async def ask_stream(self, question: str, top_k: int, use_arxiv: bool, history: list[dict] | None = None):
         """Same answer as :meth:`ask`, as events: ``stage``, ``sources``, ``token``, ``reset``, then
         ``done`` with the full response (identical shape to ``/ask``). A cache hit is a lone ``done``.
         Errors raise ``HTTPException`` like :meth:`ask`; the route turns them into an ``error`` event."""
-        question, use_arxiv, key = self._ask_key(question, top_k, use_arxiv)
+        history = history or []
+        question, use_arxiv, key = self._ask_key(question, top_k, use_arxiv, history)
         if hit := await self._cached(key):
             yield "done", hit
             return
         t0 = time.perf_counter()
         async for kind, payload in stream_research(
-            self.graph, self.research_retriever, question, top_k, {"use_arxiv": use_arxiv}, NO_SOURCES_MSG
+            self.graph, self.research_retriever, question, top_k, {"use_arxiv": use_arxiv}, NO_SOURCES_MSG, history
         ):
             if kind == "sources":
                 yield kind, [_source_out(s, i) for i, s in enumerate(payload, 1)]

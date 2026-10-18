@@ -104,7 +104,8 @@ async def ask(body: AskRequest, request: Request):
     -> generate (LLM provider chain) -> validate citations -> respond. Falls back to an extractive
     answer when no LLM succeeds, and says so when nothing relevant is found (`outcome`)."""
     await _check_rate_limit(request, "ask")
-    result = await request.app.state.service.ask(body.question, body.top_k, body.use_arxiv)
+    history = [t.model_dump() for t in body.history]
+    result = await request.app.state.service.ask(body.question, body.top_k, body.use_arxiv, history)
     _log_result("ask", body.question, result, top_k=body.top_k, use_arxiv=body.use_arxiv)
     return {**result, "request_id": _request_id(request)}
 
@@ -134,7 +135,9 @@ async def ask_stream(body: AskRequest, request: Request):
 
     async def events():
         try:
-            async for kind, payload in request.app.state.service.ask_stream(body.question, body.top_k, body.use_arxiv):
+            history = [t.model_dump() for t in body.history]
+            stream = request.app.state.service.ask_stream(body.question, body.top_k, body.use_arxiv, history)
+            async for kind, payload in stream:
                 if kind == "done":
                     _log_result("ask", body.question, payload, top_k=body.top_k, use_arxiv=body.use_arxiv, stream=True)
                     payload = {**payload, "request_id": request_id}

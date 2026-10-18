@@ -199,6 +199,23 @@
       padding: 8px 16px
     }
 
+    .newtopic {
+      margin-left: auto;
+      font-size: 13px;
+      color: var(--muted);
+      padding: 6px 10px;
+      border-radius: 8px
+    }
+
+    .newtopic:hover {
+      color: var(--ink);
+      background: var(--accent-soft)
+    }
+
+    .newtopic:not([hidden])+.go {
+      margin-left: 0
+    }
+
     .go:disabled {
       opacity: .5;
       cursor: progress
@@ -475,6 +492,7 @@
               </svg>
             </button>
           </span>
+          <button type="button" class="newtopic" id="newtopic" hidden title="Forget the conversation so far">New topic</button>
           <button class="go" id="go" type="submit">Ask</button>
         </div>
       </div>
@@ -505,6 +523,9 @@
       'why LoRA is cheap': 'What makes LoRA cheaper than full fine-tuning?',
     };
     let pdf = null;
+    // Follow-ups: the last 3 turns live only in this tab's memory and are sent with the next question.
+    // The server uses them for that one request and stores nothing; reloading or "New topic" forgets them.
+    let history = [];
 
     /* ---------- PDF attach ---------- */
     const fmtSize = (b) => b < 1024 * 1024 ? Math.max(1, Math.round(b / 1024)) + ' KB' : (b / 1048576).toFixed(1) + ' MB';
@@ -619,6 +640,7 @@
         `<p class="status">${esc(status)}</p>` +
         `<div class="answer">${d.claims && d.claims.length ? renderClaims(d) : renderAnswer(d.answer, d.sources)}</div>` +
         evidenceSummary(d) +
+        (d.standalone_question ? `<p class="evidence">Read as: “${esc(d.standalone_question)}”</p>` : '') +
         ((d.query_rewrites || []).length ? `<p class="evidence">Also searched for: ${d.query_rewrites.map((q) => '“' + esc(q) + '”').join(', ')}</p>` : '') +
         (d.warnings || []).map((w) => `<p class="note">${esc(w)}</p>`).join('') +
         (sources ? `<h2>Sources</h2><ol class="srcs">${sources}</ol>` : '');
@@ -642,7 +664,7 @@
         if (event === 'sources') { sources = data; renderDraft(sources, draft); }
         else if (event === 'token') { draft += data; renderDraft(sources, draft); }
         else if (event === 'reset') { draft = ''; renderDraft(sources, draft); }
-        else if (event === 'done') { finished = true; render(data); }
+        else if (event === 'done') { finished = data; render(data); }
         else if (event === 'error') { finished = true; throw new Error(data.detail || 'Something went wrong.'); }
       };
       for (;;) {
@@ -658,7 +680,19 @@
         }
       }
       if (!finished) throw new Error('The answer was interrupted. Try again in a moment.');
+      return finished;
     }
+
+    function remember(question, d) {
+      if (!d || d.outcome === 'insufficient_evidence') return;
+      history = [...history, { question, answer: d.answer.slice(0, 4000) }].slice(-3);
+      $('newtopic').hidden = false;
+      $('q').placeholder = 'Ask a follow-up…';
+    }
+    $('newtopic').onclick = () => {
+      history = []; $('newtopic').hidden = true;
+      $('q').placeholder = 'Ask about machine learning or NLP…'; $('q').focus();
+    };
 
     $('out').addEventListener('click', (e) => {
       const b = e.target.closest('.cite'); if (!b) return;
@@ -695,12 +729,12 @@
         } else {
           r = await fetch('/ask/stream', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question, top_k, use_arxiv: $('arxiv').checked })
+            body: JSON.stringify({ question, top_k, use_arxiv: $('arxiv').checked, history })
           });
         }
         if (!r.ok) throw new Error(await errorMessage(r));
         if (pdf) render(await r.json());
-        else await renderStream(r);
+        else remember(question, await renderStream(r));
       } catch (err) {
         showError(err instanceof TypeError ? 'Could not reach the server. Check your connection and try again.' : err.message);
       } finally { $('go').disabled = false; $('go').textContent = 'Ask'; }

@@ -11,12 +11,23 @@ ASK_REQUEST_EXAMPLE = {
 }
 
 
+class Turn(BaseModel):
+    question: str = Field(..., min_length=1, max_length=500)
+    answer: str = Field("", max_length=4000)
+
+
 class AskRequest(BaseModel):
     model_config = ConfigDict(json_schema_extra={"examples": [ASK_REQUEST_EXAMPLE]})
 
     question: str = Field(..., min_length=3, max_length=500, description="The research question")
     top_k: int = Field(5, ge=1, le=10, description="Maximum number of sources to use")
     use_arxiv: bool = Field(True, description="Also search arXiv live (ignored if ARXIV_ENABLED=false)")
+    history: list[Turn] = Field(
+        [],
+        max_length=3,
+        description="Previous turns (oldest first) when `question` is a follow-up. Used only to rewrite the "
+        "follow-up into a standalone question for this request; never stored or logged by the server.",
+    )
 
 
 class Source(BaseModel):
@@ -96,6 +107,9 @@ class AskResponse(BaseModel):
     workflow: list[WorkflowStep] = []
     query_rewrites: list[str] = Field(
         [], description="Search queries the rewriter produced (QUERY_REWRITE != off); empty if none were used"
+    )
+    standalone_question: Optional[str] = Field(
+        None, description="With `history`: the follow-up rewritten as a standalone question (what was searched)"
     )
 
 
@@ -218,6 +232,9 @@ class WorkspaceAskResponse(BaseModel):
     workflow: list[WorkflowStep] = []
     query_rewrites: list[str] = Field(
         [], description="Search queries the rewriter produced (QUERY_REWRITE != off); empty if none were used"
+    )
+    standalone_question: Optional[str] = Field(
+        None, description="With `history`: the follow-up rewritten as a standalone question (what was searched)"
     )
 
 

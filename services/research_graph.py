@@ -9,6 +9,8 @@
                  insufficient_evidence -> finalize
 
 * ``check_claims`` (P2-FR-04) exists only when ``claim_check=True`` (``CLAIM_CHECK=llm``).
+* ``contextualize`` (P2-14, ``core.followup``) runs first when the request carries ``history``: it
+  turns a follow-up into a standalone question, which every later node uses.
 * ``rewrite`` (Phase 3, ``core.query_rewrite``) exists only when ``rewrite_mode != "off"``. In
   ``single`` / ``multi`` / ``decompose`` it runs before ``retrieve``; in ``selective`` it runs after a
   weak first retrieval and loops back to ``retrieve`` once (``rewritten`` bounds the loop).
@@ -34,6 +36,7 @@ from langgraph.graph import END, START, StateGraph
 from core import metrics
 from core.citations import validate_citations
 from core.claim_support import check_claims as run_claim_check
+from core.followup import MAX_TURNS, contextualize
 from core.generator import Generator, extractive_answer
 from core.prompts import RETRY_FEEDBACK
 from core.query_rewrite import MODES as REWRITE_MODES
@@ -66,6 +69,9 @@ class ResearchState(TypedDict, total=False):
     llm_used: bool
     attempts: int
     removed_markers: list[int]
+    # follow-ups (P2-14): client-sent turns; ``question`` becomes the standalone question
+    history: list[dict]
+    followup_question: str  # what the user typed, when history was given
     # query rewriting (Phase 3)
     queries: list[str]  # what retrieve searches with, original first (absent = the question only)
     query_rewrites: list[str]  # the rewriter's queries, reported in the response
@@ -146,6 +152,15 @@ def build_research_graph(
                 "_category": "validation",
             }, "invalid"
         return {"question": question, "attempts": 0, "removed_markers": []}, "ok"
+
+    @_traced("contextualize")
+    async def contextualize_followup(state: ResearchState, config: RunnableConfig):
+        history = state["history"][-MAX_TURNS:]
+        standalone, by_llm, diagnostics = await contextualize(state["question"], history, generator.complete)
+        update = {"followup_question": state["question"], "question": standalone, "diagnostics": diagnostics}
+        if not by_llm:
+            update["_category"] = "llm_unavailable"
+        return update, "ok" if by_llm else "fallback"
 
     @_traced("rewrite")
     async def rewrite(state: ResearchState, config: RunnableConfig):
@@ -281,6 +296,8 @@ def build_research_graph(
     def after_validate_request(state: ResearchState) -> str:
         if state.get("outcome") == "error":
             return "finalize"
+        if state.get("history") and not state.get("followup_question"):
+            return "contextualize"
         return "rewrite" if rewrite_first else "retrieve"
 
     def retrieval_is_weak(state: ResearchState) -> bool:
@@ -305,6 +322,7 @@ def build_research_graph(
 
     g = StateGraph(ResearchState)
     nodes = [validate_request, retrieve, generate, validate_answer, fallback, insufficient_evidence, finalize]
+    nodes.append(contextualize_followup)
     if claim_check:
         nodes.append(check_claims)
     if rewrite_mode != "off":
@@ -312,9 +330,9 @@ def build_research_graph(
     for node in nodes:
         g.add_node(node.__name__, node)
     g.add_edge(START, "validate_request")
-    g.add_conditional_edges(
-        "validate_request", after_validate_request, ["rewrite" if rewrite_first else "retrieve", "finalize"]
-    )
+    first_search = "rewrite" if rewrite_first else "retrieve"
+    g.add_conditional_edges("validate_request", after_validate_request, [first_search, "contextualize", "finalize"])
+    g.add_edge("contextualize", first_search)
     after_retrieve_targets = ["generate", "insufficient_evidence", "finalize"]
     if rewrite_mode == "selective":
         after_retrieve_targets.append("rewrite")
@@ -331,8 +349,11 @@ def build_research_graph(
     return g.compile()
 
 
-def _initial_state(question: str, top_k: int, options: dict | None, empty_message: str | None) -> ResearchState:
+def _initial_state(
+    question: str, top_k: int, options: dict | None, empty_message: str | None, history: list[dict] | None = None
+) -> ResearchState:
     state: ResearchState = {
+        "history": list(history or []),
         "question": question,
         "top_k": top_k,
         "options": options or {},
@@ -350,13 +371,26 @@ def _config(retriever) -> dict:
 
 
 async def run_research(
-    graph, retriever, question: str, top_k: int, options: dict | None = None, empty_message: str | None = None
+    graph,
+    retriever,
+    question: str,
+    top_k: int,
+    options: dict | None = None,
+    empty_message: str | None = None,
+    history: list[dict] | None = None,
 ) -> ResearchState:
-    return await graph.ainvoke(_initial_state(question, top_k, options, empty_message), config=_config(retriever))
+    state = _initial_state(question, top_k, options, empty_message, history)
+    return await graph.ainvoke(state, config=_config(retriever))
 
 
 async def stream_research(
-    graph, retriever, question: str, top_k: int, options: dict | None = None, empty_message: str | None = None
+    graph,
+    retriever,
+    question: str,
+    top_k: int,
+    options: dict | None = None,
+    empty_message: str | None = None,
+    history: list[dict] | None = None,
 ):
     """Run the workflow, yielding events as it goes (``POST /ask/stream``):
 
@@ -374,7 +408,7 @@ async def stream_research(
     final: dict = {}
     generated = 0
     async for mode, payload in graph.astream(
-        _initial_state(question, top_k, options, empty_message),
+        _initial_state(question, top_k, options, empty_message, history),
         config=_config(retriever),
         stream_mode=["messages", "updates", "values"],
     ):

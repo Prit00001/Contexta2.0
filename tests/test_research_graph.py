@@ -150,8 +150,17 @@ def test_invalid_requests_stop_before_retrieval(question, top_k):
 def test_graph_structure_matches_design():
     graph = build_research_graph(FakeGenerator([]), 2).get_graph()
     nodes = set(graph.nodes) - {"__start__", "__end__"}
-    assert nodes == {"validate_request", "retrieve", "generate", "validate_answer", "fallback",
-                     "insufficient_evidence", "finalize"}  # fmt: skip
+    assert nodes == {
+        "validate_request",
+        "contextualize",
+        "retrieve",
+        "generate",
+        "validate_answer",
+        "fallback",
+        "insufficient_evidence",
+        "finalize",
+    }  # fmt: skip  (contextualize: only runs with history)
     edges = {(e.source, e.target) for e in graph.edges}
     assert ("validate_answer", "generate") in edges  # the bounded retry loop
+    assert ("contextualize", "retrieve") in edges
     assert ("retrieve", "insufficient_evidence") in edges and ("generate", "fallback") in edges
