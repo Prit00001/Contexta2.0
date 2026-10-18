@@ -139,6 +139,67 @@ brief's masking-vs-mitigating question — does `--rewrite multi|decompose --dec
 win rate, or only shift scores? Without decoys, BM25 alone beats the hybrid on hash embeddings;
 ADR-003's choice of hybrid was measured on MiniLM, so this is not a reason to change it.
 
+## 5d. MiniLM results: calibration, reranking, retrievers, decoys (2026-10-18)
+
+First runs with the real `sentence-transformers/all-MiniLM-L6-v2` embeddings since the environment
+gained HuggingFace access. All offline (no LLM). The plain baseline reproduced §2 exactly (overall
+R@1 0.711, R@3 0.955, R@5 0.977, MRR 0.908, nDCG@10 0.927), so the runs are comparable.
+
+### 5d.1 `MIN_SCORE` sweep on MiniLM (P2-FR-01)
+
+`eval/run_eval.py --sweep-min-score`, same rule as §5b. Excerpt:
+
+| MIN_SCORE | Recall@5 | Precision@5 | False abstention | Abstention (unanswerable) |
+|---|---|---|---|---|
+| 0.1 | 0.977 | 0.257 | 0.000 | 0.000 |
+| 0.2 (old default) | 0.973 | 0.368 | 0.000 | 0.061 |
+| **0.225** | **0.970** | **0.415** | **0.000** | **0.091** |
+| 0.25 | 0.952 | 0.470 | 0.000 | 0.182 |
+| 0.3 | 0.915 | 0.565 | 0.018 | 0.364 |
+| 0.4 | 0.803 | 0.771 | 0.064 | 0.848 |
+
+Recommended: **0.225** (highest unanswerable abstention while Recall@5 stays within 0.02 of the
+unthresholded ranking and no answerable question is left without sources). It is a small step from
+0.2: on MiniLM, retrieval scores separate unanswerable questions only weakly, so most abstention has
+to come from the LLM (measured in §5e). 0.25 would abstain on twice as many unanswerable questions but
+costs 0.025 Recall@5, just over the PRD tolerance.
+
+### 5d.2 Cross-encoder reranking (P2-07)
+
+`eval/run_eval.py --rerank` — `Xenova/ms-marco-MiniLM-L-6-v2` over the top 20 candidates:
+
+| Type | R@1 (no rerank → rerank) | R@5 | MRR |
+|---|---|---|---|
+| single_fact | 0.923 → **0.974** | 1.000 → 1.000 | 0.957 → 0.987 |
+| paraphrase | 0.718 → **0.846** | 0.949 → 0.974 | 0.822 → 0.886 |
+| comparison | 0.443 → 0.474 | 0.984 → **1.000** | 0.953 → 0.984 |
+| **overall** | **0.711 → 0.783** | **0.977 → 0.991** | **0.908 → 0.950** |
+
+Retrieval p95 latency 12 ms → **429 ms** (CPU, 20 pairs per question). Reranking is the largest
+measured improvement so far and closes most of the paraphrase gap that motivated Phase 2 (§3). It
+breaks the PRD's retrieval-latency tolerance (+30%), so it stays **off by default**; against the
+1–2 s an LLM answer takes, ~0.4 s may well be worth it — an owner decision. Unlike BM25 fusion
+(ADR-003) it scores library and arXiv candidates the same way, so it has no structural arXiv bias.
+
+### 5d.3 Retrievers and decoys on MiniLM (brief §3.4)
+
+`--rewrite off --retrievers all [--decoys]`, overall, 110 answerable questions:
+
+| Retriever | R@5 clean | R@5 with decoys | Decoy outranks all gold | literal / repetition |
+|---|---|---|---|---|
+| hybrid (/ask) | 0.977 | 0.724 | 0.918 | 0.918 / 0.882 |
+| hybrid_bm25 | 1.000 | 0.838 | 0.927 | 0.927 / 0.927 |
+| dense | 0.973 | 0.615 | 0.909 | 0.909 / 0.791 |
+| keyword (BM25) | 0.977 | 0.682 | 0.982 | 0.973 / 0.982 |
+| hybrid_rerank | 0.991 | 0.861 | **0.755** | 0.718 / 0.736 |
+
+Real embeddings resist keyword-stuffed decoys barely better than hash embeddings (§5c: 0.96): a
+decoy built from the question's own keywords still outranks the real paper for ~9 in 10 questions.
+Cross-encoder reranking is the only signal that pushes back (decoy win 0.92 → 0.76; single_fact
+0.82 → 0.51), and BM25 fusion recovers the most Recall@5. The decoys are an adversarial upper bound —
+real corpora rarely contain abstracts that are nothing but the question's keywords — but the result
+says Contexta's ranking is driven largely by lexical overlap, which matters as the corpus grows.
+
 ## 6. Known limitations of this dataset
 
 - Unreviewed (see §1) — treat as provisional.
