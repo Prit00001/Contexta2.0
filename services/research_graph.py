@@ -34,6 +34,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
 from core import metrics
+from core.abstention import is_abstention
 from core.citations import validate_citations
 from core.claim_support import check_claims as run_claim_check
 from core.followup import MAX_TURNS, contextualize
@@ -244,6 +245,11 @@ def build_research_graph(
         report = validate_citations(state["answer"], state["sources"], state.get("removed_markers"))
         if report.usable(has_sources=bool(state["sources"])):
             return {"citation_report": report, "answer": report.answer}, "ok"
+        if is_abstention(report.answer, report.valid_markers):
+            # The model followed prompt rule 2: nothing retrieved answers the question. Keep its
+            # explanation instead of retrying or quoting irrelevant sources (core.abstention).
+            update = {"citation_report": report, "answer": report.answer, "outcome": "insufficient_evidence"}
+            return update | {"_category": "insufficient_evidence"}, "abstained"
         status = "retry" if state["attempts"] < max_attempts else "unusable"
         return {"citation_report": report, "_category": "llm_invalid_output"}, status
 
@@ -318,6 +324,8 @@ def build_research_graph(
         report = state["citation_report"]
         if report.usable(has_sources=bool(state["sources"])):
             return answered_next
+        if state.get("outcome") == "insufficient_evidence":  # LLM abstained (validate_answer)
+            return "finalize"
         return "generate" if state["attempts"] < max_attempts else "fallback"
 
     g = StateGraph(ResearchState)
@@ -340,7 +348,11 @@ def build_research_graph(
     if rewrite_mode != "off":
         g.add_edge("rewrite", "retrieve")
     g.add_conditional_edges("generate", after_generate, ["validate_answer", "fallback"])
-    g.add_conditional_edges("validate_answer", after_validate_answer, [answered_next, "generate", "fallback"])
+    g.add_conditional_edges(
+        "validate_answer",
+        after_validate_answer,
+        list(dict.fromkeys([answered_next, "finalize", "generate", "fallback"])),
+    )
     g.add_edge("fallback", answered_next)
     if claim_check:
         g.add_edge("check_claims", "finalize")
