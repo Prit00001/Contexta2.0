@@ -2,9 +2,27 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — Phase 2 Stage 0
+## [Unreleased] — Phase 2
+
+### Added
+- **Evaluation harness** (`eval/run_eval.py`, `make eval`): 143-question set (LLM-drafted, `reviewed: false`), retrieval metrics, opt-in `--with-llm` answer metrics; real-embedding baseline in `docs/evaluation/EVALUATION_REPORT.md` (ADR-002).
+- **`MIN_SCORE` calibration** (P2-FR-01): `--sweep-min-score` / `make eval-sweep` reports Recall@5, Precision@5, false abstention and retrieval-level abstention per threshold.
+- **Claim-support checking** (P2-FR-04), `CLAIM_CHECK=llm`, off by default: `check_claims` graph node; per-claim `support` / `support_method`; `citation_check.verification = "claim_support"` with claim counts.
+- **Hybrid BM25 retrieval** (P2-FR-03), `HYBRID_BM25_ENABLED`, off by default (ADR-003).
+- **Shared answer cache and `/ask` rate limit in Redis** (P2-FR-07) when `REDIS_URL` is set, with in-memory fallback.
+- **`GET /metrics`** (Prometheus; `METRICS_ENABLED`): answers by endpoint/outcome/cached, answer latency, per-stage durations, LLM calls by provider/status, 429s.
+- **Evidence view in the web UI** (P2-05): uncited and unsupported sentences marked, removed markers reported, `[n]` opens its excerpt.
+
+### Changed
+- `MIN_SCORE` unset → per effective embedding backend: `0.2` (fastembed), `0.075` (hash, incl. the fallback).
+- `/workspaces/{id}/ask` runs on the shared LangGraph workflow (P2-FR-06) and returns `outcome` / `citations` / `claims` / `citation_check` / `workflow`.
+- Response schema (additive): `claims[].support`, `claims[].support_method`, `citation_check.{supported,not_supported,unknown}_claims` — `null` unless `CLAIM_CHECK=llm`.
+- ruff: import sorting (`I`) and bugbear (`B`) enabled; `zip(strict=True)` where lengths must match.
+- New dependency: `prometheus-client`.
 
 ### Fixed
+- On hash embeddings the old `MIN_SCORE=0.2` left 26% of answerable eval questions with no sources (now 0%, measured).
+- Offline start with no cached model took 46 s: the earlier "fast-fail" fix passed `retries=1` to fastembed, which 0.7 silently ignores. The downloader is now called directly with one attempt (~5 s, measured).
 - `OPENROUTER_MODEL` default was a model OpenRouter's catalog no longer serves (`HTTP 404`, confirmed live); replaced with a currently-available free model.
 - Test suite leaked real provider API keys from a local `.env` into test runs (`load_dotenv()` refilled env vars that `tests/conftest.py` had popped); tests are now isolated regardless of what `.env` contains.
 
