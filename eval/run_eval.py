@@ -30,6 +30,8 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
+from claim_labels import claim_rows, score_sheet, write_sheet
+from claim_labels import markdown as claims_markdown
 
 from app.config import get_settings
 from core.embeddings import Embedder
@@ -255,6 +257,7 @@ async def run_answers(questions: list[dict]) -> list[dict]:
                     "abstained_correctly": (
                         state.get("outcome") == "insufficient_evidence" if q["type"] == "unanswerable" else None
                     ),
+                    "claim_rows": claim_rows(q, state) if settings.claim_check == "llm" else [],
                 }
             )
         return results
@@ -317,6 +320,10 @@ def write_markdown(report: dict, path: Path) -> None:
 
 
 async def main_async(args: argparse.Namespace) -> None:
+    if args.score_claims:
+        scores = score_sheet(Path(args.score_claims))
+        print(claims_markdown(scores))
+        return
     questions = load_questions(limit=args.limit)
     if args.rewrite:
         from rewrite_eval import markdown_table, parse_modes, parse_retrievers, run_rewrite_comparison
@@ -354,6 +361,12 @@ async def main_async(args: argparse.Namespace) -> None:
         answer_results = await run_answers(questions)
         report["answers"] = summarize_answers(answer_results)
         report["answers_detail"] = answer_results
+        rows = [row for r in answer_results for row in r.pop("claim_rows")]
+        if rows:
+            write_sheet(rows, ROOT / "claims_to_label.csv")
+            print(
+                f"Wrote {len(rows)} cited claims to {ROOT / 'claims_to_label.csv'} - fill human_label, then --score-claims"
+            )
 
     out_dir = ROOT
     (out_dir / "report.json").write_text(json.dumps(report, indent=2, default=str))
@@ -384,6 +397,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--decoys", action="store_true", help="with --rewrite: add keyword-stuffed decoy abstracts (brief 3.4)"
+    )
+    parser.add_argument(
+        "--score-claims", metavar="CSV", help="score the claim checker against a labelled claims_to_label.csv"
     )
     parser.add_argument("--top-k", type=int, default=10, help="retrieval depth to score against (default 10)")
     parser.add_argument("--limit", type=int, default=None, help="only run the first N questions (smoke runs)")

@@ -112,3 +112,28 @@ def test_decoys_are_deterministic_and_counted_offline():
         s = data["summary"]
         assert 0.0 <= s["overall"]["decoy_win"] <= 1.0 and set(s["decoys"]) == set(rewrite_eval.DECOY_KINDS)
         assert s["cost"]["llm_calls"] == 0
+
+
+def test_claim_sheet_round_trip(tmp_path):
+    import claim_labels
+
+    from core.citations import validate_citations
+
+    sources = [{"text": "LoRA freezes the weights."}, {"text": "QLoRA quantizes to 4 bits."}]
+    report = validate_citations("LoRA freezes the weights [1]. QLoRA is faster [2]. No cite here.", sources)
+    report.claims[0].update(support="supported", support_method="quote")
+    report.claims[1].update(support="not_supported", support_method="llm_judge")
+    rows = claim_labels.claim_rows({"id": "q1", "question": "q?"}, {"citation_report": report, "sources": sources})
+    assert [r["claim_index"] for r in rows] == [0, 1]  # the uncited claim is not in the sheet
+    assert rows[1]["cited_text"] == "[2] QLoRA quantizes to 4 bits." and rows[1]["human_label"] == ""
+
+    rows[0]["human_label"], rows[1]["human_label"] = "supported", "supported"  # human disagrees on row 2
+    sheet = tmp_path / "claims.csv"
+    claim_labels.write_sheet(rows, sheet)
+    scores = claim_labels.score_sheet(sheet)
+    assert scores["overall"] == {
+        "n_labelled": 2, "coverage": 1.0, "accuracy": 0.5, "precision_supported": 1.0,
+        "recall_not_supported": None, "human_not_supported": 0,
+    }  # fmt: skip
+    assert scores["llm_judge"]["accuracy"] == 0.0 and scores["quote"]["accuracy"] == 1.0
+    assert "only 2 rows labelled" in claim_labels.markdown(scores).lower()
