@@ -200,7 +200,7 @@ Cross-encoder reranking is the only signal that pushes back (decoy win 0.92 → 
 real corpora rarely contain abstracts that are nothing but the question's keywords — but the result
 says Contexta's ranking is driven largely by lexical overlap, which matters as the corpus grows.
 
-## 5e. Real-LLM answer quality — Groq `openai/gpt-oss-20b` (2026-10-18)
+## 5e. Real-LLM answer quality — Groq gpt-oss (2026-10-18)
 
 `CLAIM_CHECK=llm python eval/run_eval.py --with-llm --pace 22` — all 143 questions through the full
 LangGraph workflow, MiniLM embeddings, `MIN_SCORE` 0.2, library only (no arXiv). No rate-limit
@@ -226,6 +226,23 @@ errors in this run. **Provisional**: the question set is LLM-drafted and unrevie
   regenerated, and ended as an extractive fallback quoting unrelated papers (28 of 33). Fixed in
   `core/abstention.py` (commit d8846a4); the rerun is below.
 
+### After the fixes (run 2, `openai/gpt-oss-120b`)
+
+The gpt-oss-20b daily token cap (200K/day on Groq's free tier) was exhausted by the first runs, so the
+fixes were verified with `GROQ_MODEL=openai/gpt-oss-120b` on a fixed sample
+(`--sample "single_fact:3,paraphrase:3,comparison:3,unanswerable:33"`). Different model from run 1 —
+compare outcomes, not absolute quality. 0 rate-limited items.
+
+| | Run 1 (20b, before) | Run 2 (120b, after) |
+|---|---|---|
+| Unanswerable correctly abstained | 2 / 33 (0.06) | **31 / 33 (0.94)** — 29 by the LLM (`validate_answer: abstained`), 2 at retrieval |
+| Unanswerable shown as extractive quotes | 28 / 33 | 1 / 33 |
+| Answerable answered (sample of 9) | 9 / 9 | 9 / 9, citation precision 1.00, all first attempt |
+
+Run 2 first exposed a second bug: gpt-oss-120b cites as `【1】`, which the marker parser didn't
+recognise, so 2 of 9 correctly cited answers were rejected as uncited. Fixed in `core/citations.py`
+(full-width brackets normalised); the 9-question rerun above is after that fix.
+
 ### Claim-support checker on the same answers
 
 250 cited claims (`docs/evaluation/claims_to_label.csv`): 78 `supported` by verbatim quote, 151
@@ -233,6 +250,51 @@ errors in this run. **Provisional**: the question set is LLM-drafted and unrevie
 the model adding details the cited abstract doesn't contain (e.g. Word2Vec's negative sampling,
 ColBERT's MaxSim summation). **The checker's accuracy is not measured until the CSV is human-labelled**
 (`--score-claims`).
+
+## 5f. Phase 3 — query rewriting with a real LLM (2026-10-18)
+
+`python eval/run_eval.py --rewrite all --rewrite-cache …` with `GROQ_MODEL=openai/gpt-oss-120b`
+(`reasoning_effort=low`), MiniLM, hybrid retriever, all 143 questions. 0 rewrite failures, 0
+rate-limited items. (An earlier gpt-oss-20b attempt is discarded: rate-limit cooldowns made most
+rewrites fail instantly — see the harness fix in commit 8253385.)
+
+| Condition | single_fact R@1 / R@5 | paraphrase R@1 / R@5 | comparison R@1 / R@5 | **overall** R@1 / R@5 / MRR | LLM calls/q | rewrite p50 | unanswerable abstain* |
+|---|---|---|---|---|---|---|---|
+| off | 0.923 / 1.000 | 0.718 / 0.949 | 0.443 / 0.984 | 0.711 / 0.977 / 0.908 | 0 | — | 0.061 |
+| single | **1.000** / 1.000 | **0.821** / 0.974 | 0.458 / 0.984 | **0.779** / 0.986 / **0.949** | 1 | 519 ms | 0.030 |
+| multi | 0.974 / 1.000 | 0.744 / 0.949 | 0.474 / 0.984 | 0.747 / 0.977 / 0.931 | 1 | 590 ms | 0.000 |
+| decompose | 0.949 / 1.000 | **0.821 / 1.000** | 0.474 / 0.974 | 0.765 / **0.992** / 0.948 | 1 | 502 ms | 0.061 |
+| selective (gap 0.35) | 0.949 / 1.000 | 0.718 / 0.949 | 0.443 / 0.984 | 0.720 / 0.977 / 0.914 | 0.18 | 593 ms | 0.000 |
+
+\* retrieval-level: nothing clears `MIN_SCORE` (0.2 in this run). LLM-level abstention (§5e) is what
+users mostly see; this column only shows whether rewriting pulls in sources for questions the library
+can't answer.
+
+**With decoys** (`--rewrite off,multi,decompose --retrievers all --decoys`, overall):
+
+| Condition | hybrid R@5 / decoy win | hybrid_rerank R@5 / decoy win | keyword R@5 / decoy win |
+|---|---|---|---|
+| off | 0.724 / 0.918 | 0.861 / 0.755 | 0.682 / 0.982 |
+| multi | 0.877 / **0.355** | **0.923 / 0.182** | 0.864 / 0.482 |
+| decompose | 0.841 / 0.745 | 0.879 / 0.536 | 0.794 / 0.755 |
+
+Reading:
+- Rewriting helps most where the baseline is weakest — paraphrase R@1 +0.10 with `single` or
+  `decompose` — and did not hurt single-fact questions.
+- `decompose` is the only mode that meets the PRD adoption rule (beats `off` overall, no type loses
+  >0.02 R@5, no drop in unanswerable abstention). `single` gains more R@1 but halves retrieval-level
+  abstention; `multi` gains less.
+- Comparison questions were already at R@5 0.98: no mode moves them materially.
+- `selective` at the default gap 0.35 fires on 18% of questions and captures little of the gain;
+  MiniLM top scores are mostly above 0.35 even when the top document is wrong.
+- Decoys: much of `multi`'s robustness is by construction — the decoys are built from the original
+  question's keywords and the rewrites use other words — so this shows rewriting *escapes* a
+  keyword trap tied to the user's wording; it doesn't show the retriever's lexical bias is fixed
+  (the brief's "masking vs mitigating", §2.4). The cross-encoder is the component that actually
+  scores decoys lower in every condition.
+- Cost: one extra LLM call (~0.5 s) per uncached question. Reranking alone (§5d.2: R@1 0.783,
+  R@5 0.991, +0.4 s, no LLM call or quota) gets about the same gain as `decompose`; their
+  combination on clean data was not measured.
 
 ## 6. Known limitations of this dataset
 

@@ -2,6 +2,20 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Real-LLM evaluation (2026-10-18)
+
+### Fixed
+- An LLM answer saying the sources don't cover the question was rejected as uncited, regenerated, and replaced by extractive quotes from unrelated papers (28 of 33 unanswerable eval questions). Now kept as `insufficient_evidence` (`core/abstention.py`); abstention 0.06 → 0.94.
+- Full-width citation brackets (`【1】`, gpt-oss-120b) were not recognised as markers, so cited answers were rejected.
+- Eval harness: provider cooldowns after a 429 made questions fail instantly; evals now wait and retry, and report items still rate-limited.
+
+### Changed
+- `MIN_SCORE` default on MiniLM 0.2 → 0.225 (measured sweep).
+
+### Added
+- `eval/run_eval.py`: `--pace`, `--rewrite-cache` (per model, saved per call), `--sample`, `hybrid_rerank` retriever kind.
+- Measured results: EVALUATION_REPORT §5d–5f, ADR-004 Results; `docs/evaluation/claims_to_label.csv` for human labelling.
+
 ## [Unreleased] — Phase 3 (query rewriting)
 
 ### Added

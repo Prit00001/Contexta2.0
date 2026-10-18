@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Accepted (implementation); **effect not yet measured with a real LLM** |
+| Status | Accepted (implementation); measured 2026-10-18 — see Results. Default stays `off` pending the owner's decision |
 | Date | 2026-10-18 |
 | Scope | Contexta 2.0, Phase 3 |
 | Builds on | [Phase 3 research brief](../research/PHASE_3_QUERY_REWRITING_RESEARCH.md), ADR-002, ADR-003 |
@@ -59,6 +59,33 @@ Plumbing only: `--rewrite all` against `scripts/fake_llm_server.py` (which "rewr
 stopwords and splitting on "and"/"vs") with hash embeddings. It confirms every condition runs, makes
 the expected number of calls (0 / 1 / 1 / 1 / ≤1 per question) and that `off` matches the baseline.
 **Its quality numbers say nothing about real rewriting and are deliberately not reported.**
+
+## Results (2026-10-18, real LLM)
+
+Rewriter Groq `openai/gpt-oss-120b`, MiniLM embeddings, hybrid retriever, 143 questions, 0 failed
+or rate-limited rewrites. Full tables: EVALUATION_REPORT §5f. Provisional: the question set is
+LLM-drafted and unreviewed.
+
+| | Verdict | Evidence (overall unless stated) |
+|---|---|---|
+| **H1** single rewrite helps paraphrase, can hurt single-fact | **Half supported** | paraphrase R@1 0.718 → 0.821, R@5 0.949 → 0.974; single-fact *improved* (R@1 0.923 → 1.000), no over-rewriting harm seen |
+| **H2** multi + fusion dominates single | **Not supported** on clean data | multi R@1 0.747 vs single 0.779; but under decoys multi is far more robust (decoy win 0.355 vs off 0.918) because the original query stays in the fusion |
+| **H3** only decompose materially improves comparison | **Not supported** | comparison R@5 is already 0.984 at baseline; every mode leaves it within ±0.01 (decompose 0.974), R@1 +0.03 for multi and decompose alike |
+| **H4** selective gets ≥70% of the best gain with ≤40% of the calls | **Not supported at the default gap; nearly at 0.45** | gap 0.35 fires on 18% and gains R@1 +0.009 (13% of single's +0.068). Simulated from the measured rankings: gap 0.45 fires on 38% and reaches R@1 0.756 (+0.045, 66%) — more than `multi` rewriting everything (0.747) |
+| **H5** a local 7–8B model is within a few points of a hosted one | **Not tested** | no Ollama in the environment. The gpt-oss-20b run was invalidated by rate limits, so no small-vs-large comparison either |
+
+Decision against the PRD adoption rule (beats `off` overall, no type loses >0.02 R@5, no drop in
+unanswerable abstention):
+
+- **`decompose` passes**: R@1 0.711 → 0.765, R@5 0.977 → 0.992, MRR 0.908 → 0.948, comparison R@5
+  −0.010, retrieval-level abstention unchanged. Cost: one LLM call, ~0.5 s p50.
+- `single` gains more R@1 but lowers retrieval-level abstention (0.061 → 0.030); `multi` and
+  `selective` (0.35) gain less.
+- **Recommendation for the owner, default left `off`:** reranking (EVALUATION_REPORT §5d.2) buys a
+  similar gain (R@1 0.783, R@5 0.991) for +0.4 s with no LLM call or provider quota, so enable that
+  first; add `QUERY_REWRITE=decompose` if quota allows, or `selective` with `REWRITE_GAP_SCORE=0.45`
+  as the cheaper option. The rerank + rewrite combination on clean data has not been measured.
+- `REWRITE_GAP_SCORE` default stays 0.35 (owner decision); 0.45 is the measured suggestion.
 
 ## Consequences
 

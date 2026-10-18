@@ -43,7 +43,7 @@ FastAPI · LangGraph · LangChain · FAISS · fastembed (all-MiniLM-L6-v2, ONNX)
 |---|---|
 | Query rewriting | `QUERY_REWRITE=single|multi|decompose|selective` — the research brief's conditions 1–5 as a `rewrite` node in the graph; one LLM call max, original query kept (except `single`), rewrites shown in `query_rewrites` and the UI. [ADR-004](docs/decisions/ADR-004-query-rewriting.md) |
 | Local rewriter | `REWRITE_PROVIDERS=custom` + `LLM_BASE_URL` → rewrite with a local Ollama model, answer with the hosted chain (condition 6) |
-| Comparison harness | `PYTHONPATH=. python eval/run_eval.py --rewrite all` — per-type recall/MRR/nDCG, LLM calls, rewrite latency, abstention, Δsimilarity to gold. **Not yet run with a real LLM; no condition is shown to help yet** |
+| Comparison harness | `PYTHONPATH=. python eval/run_eval.py --rewrite all` — measured with gpt-oss-120b: `decompose` R@1 0.711 → 0.765, R@5 0.977 → 0.992 for one LLM call; `single` best on paraphrase (R@1 0.72 → 0.82). Default stays `off` (owner decision). EVALUATION_REPORT §5f |
 
 Not verified from the build environment (network-restricted): live arXiv, real LLM providers, the real embedding-model download, and the Docker build. See [Known limitations](#known-limitations).
 
@@ -209,18 +209,21 @@ Current: **241 passed** (Python 3.13, with Postgres 16 + pgvector and a local `r
 
 ## Known limitations
 
-- Citation validation is **marker-level** by default: it proves `[n]` points to a retrieved source, not that the source supports the claim (`verification: "marker_only"`). `CLAIM_CHECK=llm` adds an LLM-judge support check, but the judge's own precision has **not been measured** yet.
+- Citation validation is **marker-level** by default: it proves `[n]` points to a retrieved source, not that the source supports the claim (`verification: "marker_only"`). `CLAIM_CHECK=llm` adds an LLM-judge support check; its accuracy is unmeasured until `docs/evaluation/claims_to_label.csv` is human-labelled.
+- Measured with a real LLM (Groq gpt-oss, EVALUATION_REPORT §5e): citation precision 0.99 single-fact / 0.97 comparison but **0.72 on paraphrased questions**; abstention on out-of-library questions 0.94 after the fix (0.06 before).
+- Keyword-stuffed decoy abstracts outrank the right paper for ~9 in 10 questions with every retriever on MiniLM; reranking and query rewriting reduce that (EVALUATION_REPORT §5d.3, §5f).
 - `MIN_SCORE` is calibrated on the LLM-drafted, unreviewed eval set; recheck after the human review.
 - The evaluation questions were LLM-drafted and are not yet human-reviewed; treat every quality number as provisional.
 - The library is 25 curated abstracts; arXiv search is keyword-based and best-effort.
-- Live providers, arXiv and the model download were exercised only through mocks/stubs in Phase 1; `langchain-openai` sends `max_completion_tokens`, whose support by Gemini's OpenAI-compatible endpoint is unverified.
+- Live arXiv has still only been exercised through mocks; providers and the model download were verified for real in Phase 2.
 - Caches and the `/ask` rate limiter are per process unless `REDIS_URL` is set. The PDF-embedding cache is always per process.
 - `/ask` is intentionally unauthenticated (public demo), protected by rate limiting.
 
 ## Roadmap
 
-- **Phase 2, still open** — answer-quality baseline with real providers (`--with-llm`, needs your keys and go-ahead), MiniLM `MIN_SCORE` sweep, measuring the claim-check judge on a labelled sample, human review of the eval set; later: reranking, streaming, React frontend: [PHASE_2_BACKLOG](docs/roadmap/PHASE_2_BACKLOG.md)
-- **Phase 3** — rewriting conditions are built ([ADR-004](docs/decisions/ADR-004-query-rewriting.md)); next: run `--rewrite all` with a real LLM, calibrate `REWRITE_GAP_SCORE`, compare a local Ollama rewriter, add the adversarial decoy subset: [research brief](docs/research/PHASE_3_QUERY_REWRITING_RESEARCH.md)
+- **Decisions waiting on the owner** — turn on reranking (+0.07 R@1 for +0.4 s), turn on `QUERY_REWRITE=decompose` (+0.05 R@1, one LLM call) or `selective` with `REWRITE_GAP_SCORE=0.45`, server-side conversation history for workspaces.
+- **Phase 2, still open** — human review of the eval set and labelling `docs/evaluation/claims_to_label.csv` (measures the claim checker); later: React frontend: [PHASE_2_BACKLOG](docs/roadmap/PHASE_2_BACKLOG.md)
+- **Phase 3** — conditions 1–5 measured ([ADR-004 Results](docs/decisions/ADR-004-query-rewriting.md)): H1 half supported, H2–H4 not as stated; still open: H5 (local Ollama rewriter) and rerank + rewrite combined: [research brief](docs/research/PHASE_3_QUERY_REWRITING_RESEARCH.md)
 
 ## Project layout
 

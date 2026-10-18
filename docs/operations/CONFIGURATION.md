@@ -22,7 +22,7 @@ A provider is *configured* when its key is set (for `custom`: when both `LLM_BAS
 | `LLM_MAX_ATTEMPTS` | `2` | no | Generation attempts per question in the workflow, 1–3 |
 | `QUERY_REWRITE` | `off` | Phase 3 experiment: `single` (retrieve with one rewrite), `multi` (3 rewrites + original, fused), `decompose` (sub-questions + original), `selective` (rewrite only when retrieval looks weak). One extra LLM call per uncached request; rewrites search the local library only. [ADR-004](../decisions/ADR-004-query-rewriting.md) |
 | `REWRITE_PROVIDERS` | – | Provider chain for rewriting only (e.g. `custom` for a local Ollama); default: `LLM_PROVIDERS` |
-| `REWRITE_GAP_SCORE` | `0.35` | `selective`: rewrite when the best retrieval score is below this. Uncalibrated placeholder |
+| `REWRITE_GAP_SCORE` | `0.35` | `selective`: rewrite when the best retrieval score is below this. On MiniLM 0.35 fires on only 18% of questions; 0.45 (38%) captures more of the gain than rewriting every question with `multi` (ADR-004 Results) |
 | `CLAIM_CHECK` | `off` | `llm`: after citation validation, check each cited claim against its cited text — verbatim quotes locally, the rest in one LLM-judge call through the provider chain. Adds `claims[].support` and claim counts to `citation_check`. Costs one extra LLM call per uncached answer; judge precision not yet measured |
 | `REQUIRE_LLM` | `false` | no | `true`: refuse to start with no configured provider |
 
