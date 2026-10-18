@@ -1,7 +1,7 @@
 # Common tasks. Windows users: run the commands shown after each target directly.
 PY ?= python
 
-.PHONY: install run run-demo fake-llm test test-db lint format smoke eval lock
+.PHONY: install run run-demo fake-llm test test-db lint format smoke eval eval-sweep lock
 
 install:          ## create .venv and install pinned dev dependencies
 	$(PY) -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
@@ -37,3 +37,6 @@ eval:             ## retrieval-only eval metrics, offline (add --with-llm yourse
 lock:             ## re-pin dependencies after editing requirements*.in
 	uv pip compile requirements.in --universal --python-version 3.11 -o requirements.txt
 	uv pip compile requirements-dev.in --universal --python-version 3.11 -o requirements-dev.txt
+
+eval-sweep:       ## MIN_SCORE calibration curve for the configured embedding backend, offline
+	PYTHONPATH=. $(PY) eval/run_eval.py --sweep-min-score

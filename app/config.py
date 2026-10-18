@@ -40,6 +40,12 @@ class ProviderSpec:
 
 KNOWN_PROVIDERS = ("groq", "gemini", "openrouter", "custom")
 
+# Default MIN_SCORE per *effective* embedding backend (P2-FR-01), used when MIN_SCORE is unset.
+# hash: calibrated with `eval/run_eval.py --sweep-min-score` (EVALUATION_REPORT.md section 5b) - the old
+# 0.2 left 26% of answerable eval questions with no sources at all on hash embeddings.
+# fastembed (MiniLM): 0.2 is the Phase 1 informal value; not yet swept (model not downloadable here).
+DEFAULT_MIN_SCORE = {"fastembed": 0.2, "hash": 0.075}
+
 # field name -> environment variable (only where they differ from FIELD.upper())
 _ENV_NAMES = {
     "model_cache_dir": "FASTEMBED_CACHE_PATH",
@@ -56,7 +62,7 @@ class Settings(BaseModel):
     embed_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     cache_dir: Path = Path(".cache")
     model_cache_dir: Optional[str] = None
-    min_score: float = Field(0.2, ge=-1.0, le=1.0)
+    min_score: Optional[float] = Field(None, ge=-1.0, le=1.0)  # None -> DEFAULT_MIN_SCORE[backend]
     hybrid_bm25_enabled: bool = False  # P2-FR-03: off by default - see EVALUATION_REPORT.md for why
     # the measured improvement doesn't yet justify flipping the real default (it only covers
     # local-only retrieval; arXiv-mixed retrieval, the actual default path, is structurally
@@ -101,6 +107,11 @@ class Settings(BaseModel):
     supabase_jwt_secret: str = Field("", repr=False)
     redis_url: str = Field("", repr=False)
     workspace_rate_limit_per_min: int = Field(60, ge=0)
+
+    def min_score_for(self, backend: str) -> float:
+        """MIN_SCORE if set explicitly, else the calibrated default for the backend actually in use
+        (which is "hash" when fastembed was requested but failed to load)."""
+        return self.min_score if self.min_score is not None else DEFAULT_MIN_SCORE[backend]
 
     @property
     def max_pdf_bytes(self) -> int:

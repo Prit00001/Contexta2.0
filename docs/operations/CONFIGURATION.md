@@ -32,7 +32,7 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 | `EMBED_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Must be a fastembed-supported model |
 | `FASTEMBED_CACHE_PATH` | fastembed default | Model cache directory (Docker: `/app/.model_cache`, baked in) |
 | `CACHE_DIR` | `.cache` (`/tmp/contexta-cache` on Vercel) | Library embedding cache (`embeddings.npz`) |
-| `MIN_SCORE` | `0.2` | Hybrid-score cut for library/arXiv sources, [-1, 1] |
+| `MIN_SCORE` | per backend | Hybrid-score cut for library/arXiv sources, [-1, 1]. Unset: `0.2` on fastembed, `0.075` on hash embeddings (incl. the fallback) — calibrated with `eval/run_eval.py --sweep-min-score` |
 | `ARXIV_ENABLED` | `true` | Global switch; per request `use_arxiv` |
 | `ARXIV_MAX_RESULTS` | `12` | 1–50 |
 | `ARXIV_BUDGET_S` | `9` | Total arXiv time budget per request |

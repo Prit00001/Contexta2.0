@@ -83,3 +83,15 @@ def test_secrets_never_appear_in_repr(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:db-super-secret@h/db")
     text = repr(load_settings())
     assert "super-secret" not in text
+
+
+def test_min_score_defaults_per_effective_backend(monkeypatch):
+    from app.config import DEFAULT_MIN_SCORE, load_settings
+
+    monkeypatch.delenv("MIN_SCORE", raising=False)
+    s = load_settings()
+    assert s.min_score is None
+    assert s.min_score_for("fastembed") == DEFAULT_MIN_SCORE["fastembed"] == 0.2
+    assert s.min_score_for("hash") == DEFAULT_MIN_SCORE["hash"] == 0.075
+    monkeypatch.setenv("MIN_SCORE", "0.3")
+    assert load_settings().min_score_for("hash") == 0.3  # explicit MIN_SCORE wins for every backend

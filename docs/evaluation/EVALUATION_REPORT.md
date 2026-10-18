@@ -71,6 +71,41 @@ for the full before/after table and why it isn't the default despite a clean loc
 (the eval harness doesn't cover the arXiv-mixed path, which is the real default behavior, and the
 one test that does cover it caught a structural bias against arXiv results).
 
+## 5b. P2-FR-01 — `MIN_SCORE` calibration (2026-10-18)
+
+Command: `PYTHONPATH=. python eval/run_eval.py --sweep-min-score` (offline, no LLM). Each question is
+retrieved once at `min_score=0`; every candidate threshold is then applied to the collected rankings
+(ADR-002 §4). Abstention here is **retrieval-level**: when nothing clears `MIN_SCORE` the workflow
+answers `insufficient_evidence` without an LLM call, so it's measurable offline. LLM-level abstention
+(sources retrieved, model declines) still needs `--with-llm` (P2-FR-05).
+
+Selection rule (in the harness): the threshold with the highest abstention on the 33 `unanswerable`
+questions among those whose Recall@5 stays within 0.02 of `min_score=0` (PRD §1 tolerance) **and**
+that leave no answerable question without sources.
+
+**Hash embeddings** (`EMBED_BACKEND=hash`, also what runs when fastembed fails to load), excerpt:
+
+| MIN_SCORE | Recall@5 | Precision@5 | False abstention (answerable) | Abstention (unanswerable) |
+|---|---|---|---|---|
+| 0.0 | 0.920 | 0.236 | 0.000 | 0.000 |
+| 0.05 | 0.920 | 0.247 | 0.000 | 0.000 |
+| **0.075** | **0.915** | **0.291** | **0.000** | **0.030** |
+| 0.1 | 0.888 | 0.365 | 0.009 | 0.182 |
+| 0.15 | 0.783 | 0.581 | 0.073 | 0.515 |
+| 0.2 (old default) | 0.608 | 0.773 | **0.264** | 0.758 |
+| 0.3 | 0.323 | 0.983 | 0.655 | 0.970 |
+
+- The old default 0.2 left **26% of answerable questions with zero sources** on hash embeddings — the
+  Phase 1 "LoRA question returns 0 sources" observation, now measured.
+- Hash scores separate answerable from unanswerable questions poorly: any threshold that abstains on
+  a meaningful share of unanswerable questions also drops answerable ones. 0.075 is chosen for recall;
+  on hash embeddings, abstention is left mostly to the LLM. New default: `DEFAULT_MIN_SCORE["hash"] =
+  0.075` (`app/config.py`), used whenever `MIN_SCORE` is unset and the *effective* backend is hash.
+- **MiniLM (fastembed) is not yet swept**: the model can't be downloaded from this sandbox
+  (huggingface.co and the GCS mirror both return 403). Its default stays 0.2 until the same command
+  runs where the model loads; the harness prints the recommended value and writes
+  `eval/min_score_sweep_fastembed.json`.
+
 ## 6. Known limitations of this dataset
 
 - Unreviewed (see §1) — treat as provisional.

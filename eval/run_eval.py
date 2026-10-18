@@ -11,6 +11,7 @@ distribution, cost/latency) need a real LLM call per question and are opt-in:
     python eval/run_eval.py                              # retrieval only, offline
     python eval/run_eval.py --with-llm                    # + answer-quality + cost (real API calls)
     python eval/run_eval.py --with-llm --limit 10          # quick smoke run
+    python eval/run_eval.py --sweep-min-score             # MIN_SCORE calibration curve, offline
 
 Scoped to the local 25-paper library only (arxiv_snapshot.jsonl is not yet populated - see
 eval/dataset/ARXIV_SNAPSHOT.md); every dataset question's gold_document_ids are local doc_0XX IDs.
@@ -135,6 +136,78 @@ def summarize_retrieval(results: list[dict]) -> dict:
     return summary
 
 
+# ---- MIN_SCORE calibration (P2-FR-01) -------------------------------------------------------
+
+SWEEP_THRESHOLDS = [round(0.025 * i, 3) for i in range(0, 25)]  # 0.0 .. 0.6
+SWEEP_K = 5  # /ask's default top_k
+RECALL_TOLERANCE = 0.02  # PRD_PHASE_2 section 1: no metric may drop more than 0.02 absolute
+
+
+async def run_score_sweep(questions: list[dict], hybrid_bm25: bool = False) -> dict:
+    """Score every question once at min_score=0 (true ranking with scores), then apply each candidate
+    threshold to the collected rankings - no re-retrieval per threshold (ADR-002 section 4).
+
+    Abstention here is retrieval-level: when nothing passes MIN_SCORE the workflow answers
+    ``insufficient_evidence`` without calling an LLM, so it is measurable offline. Abstention by the
+    LLM itself (sources retrieved, model says they are insufficient) needs ``--with-llm``.
+    """
+    settings = get_settings()
+    embedder = Embedder(settings.embed_backend, settings.embed_model, settings.model_cache_dir)
+    library = Retriever(embedder, settings.cache_dir / "embeddings.npz")
+    library.build(DOCUMENTS)
+    retriever = ResearchRetriever(
+        embedder=embedder, library=library, arxiv=None, arxiv_enabled=False,
+        arxiv_budget_s=settings.arxiv_budget_s, min_score=0.0, hybrid_bm25_enabled=hybrid_bm25,
+    )  # fmt: skip
+    rows = []
+    for q in questions:
+        result = await retriever.aretrieve(q["question"], 10, use_arxiv=False)
+        rows.append({"type": q["type"], "gold": set(q["gold_document_ids"]), "ranked": result.sources})
+
+    answerable = [r for r in rows if r["type"] != "unanswerable"]
+    unanswerable = [r for r in rows if r["type"] == "unanswerable"]
+    curve = []
+    for t in SWEEP_THRESHOLDS:
+        recalls, precisions, false_abstain = [], [], 0
+        for r in answerable:
+            kept = [s["document_id"] for s in r["ranked"] if s["score"] >= t][:SWEEP_K]
+            recalls.append(recall_at_k(kept, r["gold"], SWEEP_K))
+            if kept:
+                precisions.append(len(set(kept) & r["gold"]) / len(kept))
+            else:
+                false_abstain += 1
+        abstained = sum(1 for r in unanswerable if not any(s["score"] >= t for s in r["ranked"]))
+        curve.append(
+            {
+                "min_score": t,
+                "recall@5": _mean(recalls),
+                "precision@5": _mean(precisions),
+                "false_abstention_rate": round(false_abstain / len(answerable), 4) if answerable else 0.0,
+                "abstention_rate_unanswerable": round(abstained / len(unanswerable), 4) if unanswerable else 0.0,
+            }
+        )
+    base = curve[0]["recall@5"]
+    within = [c for c in curve if base - c["recall@5"] <= RECALL_TOLERANCE and c["false_abstention_rate"] == 0.0]
+    best = max(within, key=lambda c: (c["abstention_rate_unanswerable"], -c["min_score"]))
+    top1 = sorted(r["ranked"][0]["score"] for r in rows if r["ranked"] and r["type"] != "unanswerable")
+    top1_un = sorted(r["ranked"][0]["score"] for r in unanswerable if r["ranked"])
+    return {
+        "embedding_backend": embedder.backend,
+        "embedding_degraded": embedder.degraded,
+        "hybrid_bm25": hybrid_bm25,
+        "k": SWEEP_K,
+        "curve": curve,
+        "recommended_min_score": best["min_score"],
+        "rule": (
+            f"highest abstention on unanswerable among thresholds with recall@{SWEEP_K} within "
+            f"{RECALL_TOLERANCE} of min_score=0 and no answerable question left without sources "
+            "(ties -> lowest threshold)"
+        ),
+        "top1_score_answerable_min": round(top1[0], 4) if top1 else None,
+        "top1_score_unanswerable_max": round(top1_un[-1], 4) if top1_un else None,
+    }
+
+
 # ---- answer-quality metrics (--with-llm) --------------------------------------------------
 
 
@@ -148,7 +221,7 @@ async def run_answers(questions: list[dict]) -> list[dict]:
         generator = Generator(settings.providers, client, settings.llm_timeout)
         retriever = ResearchRetriever(
             embedder=embedder, library=library, arxiv=arxiv, arxiv_enabled=False,
-            arxiv_budget_s=settings.arxiv_budget_s, min_score=settings.min_score,
+            arxiv_budget_s=settings.arxiv_budget_s, min_score=settings.min_score_for(embedder.backend),
         )  # fmt: skip
         graph = build_research_graph(generator, settings.llm_max_attempts)
 
@@ -243,6 +316,20 @@ def write_markdown(report: dict, path: Path) -> None:
 
 async def main_async(args: argparse.Namespace) -> None:
     questions = load_questions(limit=args.limit)
+    if args.sweep_min_score:
+        sweep = await run_score_sweep(questions, hybrid_bm25=args.hybrid_bm25)
+        out = ROOT / f"min_score_sweep_{sweep['embedding_backend']}.json"
+        out.write_text(json.dumps(sweep, indent=2))
+        print("| MIN_SCORE | Recall@5 | Precision@5 | False abstention | Abstention (unanswerable) |")
+        print("|---|---|---|---|---|")
+        for c in sweep["curve"]:
+            print(
+                f"| {c['min_score']} | {c['recall@5']} | {c['precision@5']} | {c['false_abstention_rate']} "
+                f"| {c['abstention_rate_unanswerable']} |"
+            )
+        print(f"\nbackend={sweep['embedding_backend']} recommended MIN_SCORE={sweep['recommended_min_score']}")
+        print(f"rule: {sweep['rule']}\nWrote {out}")
+        return
     retrieval_results = await run_retrieval(questions, top_k=args.top_k, hybrid_bm25=args.hybrid_bm25)
     report: dict = {
         "n_questions": len(questions),
@@ -267,6 +354,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--with-llm", action="store_true", help="also run answer-quality metrics (real API calls)")
     parser.add_argument("--hybrid-bm25", action="store_true", help="RRF-fuse a BM25 ranking in (P2-FR-03)")
+    parser.add_argument(
+        "--sweep-min-score", action="store_true", help="MIN_SCORE precision/recall/abstention curve (P2-FR-01)"
+    )
     parser.add_argument("--top-k", type=int, default=10, help="retrieval depth to score against (default 10)")
     parser.add_argument("--limit", type=int, default=None, help="only run the first N questions (smoke runs)")
     args = parser.parse_args()

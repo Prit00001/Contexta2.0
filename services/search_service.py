@@ -63,7 +63,7 @@ class SearchService:
         self.graph = build_research_graph(generator, settings.llm_max_attempts)
         self.research_retriever = ResearchRetriever(
             embedder=embedder, library=retriever, arxiv=arxiv, arxiv_enabled=settings.arxiv_enabled,
-            arxiv_budget_s=settings.arxiv_budget_s, min_score=settings.min_score,
+            arxiv_budget_s=settings.arxiv_budget_s, min_score=settings.min_score_for(embedder.backend),
             hybrid_bm25_enabled=settings.hybrid_bm25_enabled,
         )  # fmt: skip
         # core.cache: Redis-backed (shared across instances) when REDIS_URL is set, else per process

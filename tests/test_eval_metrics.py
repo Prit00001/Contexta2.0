@@ -1,4 +1,4 @@
-"""Pure-math tests for eval/run_eval.py's scoring functions - no network, no LLM, no corpus."""
+"""Tests for eval/run_eval.py: pure-math scoring functions, plus the MIN_SCORE sweep on hash embeddings (offline)."""
 
 import sys
 from pathlib import Path
@@ -41,3 +41,17 @@ def test_ndcg_at_k_rewards_earlier_hits():
     high = ndcg_at_k(["a", "x", "y"], {"a"}, 10)
     low = ndcg_at_k(["x", "a", "y"], {"a"}, 10)
     assert high > low
+
+
+def test_min_score_sweep_curve_is_monotonic():
+    import asyncio
+
+    from run_eval import load_questions, run_score_sweep
+
+    sweep = asyncio.run(run_score_sweep(load_questions()))  # conftest: hash embeddings, offline
+    curve = sweep["curve"]
+    assert curve[0]["min_score"] == 0.0 and curve[0]["false_abstention_rate"] == 0.0
+    for a, b in zip(curve, curve[1:]):  # a higher threshold never retrieves more
+        assert b["recall@5"] <= a["recall@5"]
+        assert b["abstention_rate_unanswerable"] >= a["abstention_rate_unanswerable"]
+    assert sweep["recommended_min_score"] in {c["min_score"] for c in curve}
