@@ -200,6 +200,40 @@ Cross-encoder reranking is the only signal that pushes back (decoy win 0.92 → 
 real corpora rarely contain abstracts that are nothing but the question's keywords — but the result
 says Contexta's ranking is driven largely by lexical overlap, which matters as the corpus grows.
 
+## 5e. Real-LLM answer quality — Groq `openai/gpt-oss-20b` (2026-10-18)
+
+`CLAIM_CHECK=llm python eval/run_eval.py --with-llm --pace 22` — all 143 questions through the full
+LangGraph workflow, MiniLM embeddings, `MIN_SCORE` 0.2, library only (no arXiv). No rate-limit
+errors in this run. **Provisional**: the question set is LLM-drafted and unreviewed (§1).
+
+### Before the abstention fix (run 1)
+
+| Type | n | Outcomes | Citation precision |
+|---|---|---|---|
+| single_fact | 39 | answered 39 | 0.987 |
+| paraphrase | 39 | answered 39 | 0.722 |
+| comparison | 32 | answered 32 | 0.969 |
+| unanswerable | 33 | extractive_fallback 28, answered 3, insufficient_evidence 2 | — |
+
+- All 110 answerable questions were answered by the LLM; 108 of 143 needed one generation attempt.
+  Latency p50 1.33 s, p95 1.93 s.
+- Citation precision (cited source is a gold source) is high for single-fact and comparison
+  questions; **paraphrase questions are the weak spot (0.72)** — the same type with the weakest
+  retrieval (§2), so the model cites the wrong paper when retrieval ranks it first.
+- **Abstention was broken: 2 of 33 unanswerable questions (0.06).** The model did abstain — e.g. on
+  "What is the architecture of a GAN?": *"none of the provided sources contain information about
+  Generative Adversarial Networks"* — but an uncited answer failed citation validation, was
+  regenerated, and ended as an extractive fallback quoting unrelated papers (28 of 33). Fixed in
+  `core/abstention.py` (commit d8846a4); the rerun is below.
+
+### Claim-support checker on the same answers
+
+250 cited claims (`docs/evaluation/claims_to_label.csv`): 78 `supported` by verbatim quote, 151
+`supported` and 18 `not_supported` by the LLM judge, 3 `unknown`. Spot checks of the 18 look right —
+the model adding details the cited abstract doesn't contain (e.g. Word2Vec's negative sampling,
+ColBERT's MaxSim summation). **The checker's accuracy is not measured until the CSV is human-labelled**
+(`--score-claims`).
+
 ## 6. Known limitations of this dataset
 
 - Unreviewed (see §1) — treat as provisional.
