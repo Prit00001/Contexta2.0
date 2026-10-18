@@ -12,6 +12,7 @@ distribution, cost/latency) need a real LLM call per question and are opt-in:
     python eval/run_eval.py --with-llm                    # + answer-quality + cost (real API calls)
     python eval/run_eval.py --with-llm --limit 10          # quick smoke run
     python eval/run_eval.py --sweep-min-score             # MIN_SCORE calibration curve, offline
+    python eval/run_eval.py --rerank                      # retrieval metrics with cross-encoder reranking
     python eval/run_eval.py --rewrite all                 # Phase 3 query-rewrite conditions (LLM calls)
     python eval/run_eval.py --rewrite off --retrievers all --decoys   # decoy/bias check, offline
 
@@ -37,6 +38,7 @@ from app.config import get_settings
 from core.embeddings import Embedder
 from core.generator import Generator
 from core.lc_retriever import ResearchRetriever
+from core.reranker import Reranker
 from core.retriever import Retriever
 from data.documents import DOCUMENTS
 from services.arxiv_client import ArxivClient
@@ -74,15 +76,25 @@ def ndcg_at_k(ranked_ids: list[str], gold: set[str], k: int) -> float:
     return dcg / idcg if idcg > 0 else 0.0
 
 
-async def run_retrieval(questions: list[dict], top_k: int = 10, hybrid_bm25: bool = False) -> list[dict]:
+DEFAULT_RERANK_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"
+
+
+async def run_retrieval(
+    questions: list[dict], top_k: int = 10, hybrid_bm25: bool = False, rerank: bool = False
+) -> list[dict]:
     settings = get_settings()
     embedder = Embedder(settings.embed_backend, settings.embed_model, settings.model_cache_dir)
     library = Retriever(embedder, settings.cache_dir / "embeddings.npz")
     library.build(DOCUMENTS)
+    reranker = None
+    if rerank:  # P2-07: RERANK_MODEL, or the small default cross-encoder
+        reranker = Reranker(settings.rerank_model or DEFAULT_RERANK_MODEL, settings.model_cache_dir)
+        if not reranker.available:
+            raise SystemExit(f"--rerank: could not load {reranker.model_name} ({reranker.error}); is the network up?")
     retriever = ResearchRetriever(
         embedder=embedder, library=library, arxiv=None, arxiv_enabled=False,
         arxiv_budget_s=settings.arxiv_budget_s, min_score=0.0,  # score the full ranking, not just >= MIN_SCORE
-        hybrid_bm25_enabled=hybrid_bm25,
+        hybrid_bm25_enabled=hybrid_bm25, reranker=reranker, rerank_candidates=settings.rerank_candidates,
     )  # fmt: skip
 
     results = []
@@ -136,6 +148,8 @@ def summarize_retrieval(results: list[dict]) -> dict:
         "recall@5": _mean([r["recall@5"] for r in results]),
         "mrr": _mean([r["mrr"] for r in results]),
         "ndcg@10": _mean([r["ndcg@10"] for r in results]),
+        # retrieval-only latency: what reranking (P2-07) and BM25 fusion cost
+        "latency_p95_ms": sorted(r["latency_ms"] for r in results)[int(0.95 * (len(results) - 1))] if results else 0.0,
     }
     return summary
 
@@ -351,7 +365,9 @@ async def main_async(args: argparse.Namespace) -> None:
         print(f"\nbackend={sweep['embedding_backend']} recommended MIN_SCORE={sweep['recommended_min_score']}")
         print(f"rule: {sweep['rule']}\nWrote {out}")
         return
-    retrieval_results = await run_retrieval(questions, top_k=args.top_k, hybrid_bm25=args.hybrid_bm25)
+    retrieval_results = await run_retrieval(
+        questions, top_k=args.top_k, hybrid_bm25=args.hybrid_bm25, rerank=args.rerank
+    )
     report: dict = {
         "n_questions": len(questions),
         "retrieval": summarize_retrieval(retrieval_results),
@@ -380,6 +396,9 @@ async def main_async(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--with-llm", action="store_true", help="also run answer-quality metrics (real API calls)")
+    parser.add_argument(
+        "--rerank", action="store_true", help="cross-encoder reranking (P2-07); downloads ~80 MB the first time"
+    )
     parser.add_argument("--hybrid-bm25", action="store_true", help="RRF-fuse a BM25 ranking in (P2-FR-03)")
     parser.add_argument(
         "--sweep-min-score", action="store_true", help="MIN_SCORE precision/recall/abstention curve (P2-FR-01)"

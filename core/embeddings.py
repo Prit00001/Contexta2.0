@@ -42,8 +42,9 @@ def _hash_embed(texts: list[str]) -> np.ndarray:
     return _normalize(out)
 
 
-def _load_fastembed(model_name: str, cache_dir: str | None):
+def _load_fastembed(model_name: str, cache_dir: str | None, kind: str = "embedding"):
     """Load a fastembed model, failing fast when it is neither cached nor downloadable (P2-FR-02).
+    ``kind`` is ``embedding`` (TextEmbedding) or ``cross_encoder`` (TextCrossEncoder, core.reranker).
 
     fastembed 0.7 does not pass ``TextEmbedding(retries=...)`` through to its downloader, which
     always makes 3 attempts sleeping 3 + 9 + 27 s - ~42 s offline (measured). So the download is
@@ -55,8 +56,13 @@ def _load_fastembed(model_name: str, cache_dir: str | None):
 
     from fastembed import TextEmbedding
     from fastembed.common.utils import define_cache_dir
+    from fastembed.rerank.cross_encoder import TextCrossEncoder
 
-    for impl in TextEmbedding.EMBEDDINGS_REGISTRY:
+    wrapper, registry = {
+        "embedding": (TextEmbedding, TextEmbedding.EMBEDDINGS_REGISTRY),
+        "cross_encoder": (TextCrossEncoder, TextCrossEncoder.CROSS_ENCODER_REGISTRY),
+    }[kind]
+    for impl in registry:
         if any(m.model.lower() == model_name.lower() for m in impl._list_supported_models()):
             break
     else:
@@ -68,7 +74,7 @@ def _load_fastembed(model_name: str, cache_dir: str | None):
     # Only probe the cache when it plausibly holds the model: a local-only miss also costs a 3 s sleep.
     local_only = any(p.is_dir() and any(p.iterdir()) for p in cached)
     path = impl.download_model(desc, str(root), retries=1, local_files_only=local_only)
-    return TextEmbedding(model_name=model_name, cache_dir=cache_dir, specific_model_path=str(path))
+    return wrapper(model_name=model_name, cache_dir=cache_dir, specific_model_path=str(path))
 
 
 class Embedder:

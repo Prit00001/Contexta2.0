@@ -20,6 +20,7 @@ from core.cache import make_answer_cache
 from core.embeddings import Embedder
 from core.generator import Generator
 from core.rate_limit import make_limiter, make_redis
+from core.reranker import Reranker
 from core.retriever import Retriever
 from data.documents import DOCUMENTS
 from services.arxiv_client import ArxivClient
@@ -48,7 +49,13 @@ async def lifespan(app: FastAPI):
     redis = make_redis(s.redis_url)  # shared answer cache + rate limits across instances (P2-FR-07)
     app.state.redis = redis
     app.state.service = SearchService(
-        s, embedder, retriever, arxiv, generator, answer_cache=make_answer_cache(redis, s.answer_cache_ttl)
+        s,
+        embedder,
+        retriever,
+        arxiv,
+        generator,
+        answer_cache=make_answer_cache(redis, s.answer_cache_ttl),
+        reranker=Reranker(s.rerank_model, s.model_cache_dir) if s.rerank_model else None,
     )
     app.state.limiter = make_limiter(redis, s.rate_limit_per_min)
     app.state.db_configured = bool(s.database_url)

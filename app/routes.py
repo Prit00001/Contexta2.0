@@ -260,6 +260,12 @@ async def ready(request: Request):
         checks["llm"] = ReadyCheck(ok=False, detail="all providers cooling down after errors")
     else:
         checks["llm"] = ReadyCheck(ok=True, detail="available: " + ", ".join(available))
+    reranker = getattr(service, "reranker", None)
+    if reranker is not None:
+        checks["reranker"] = ReadyCheck(
+            ok=reranker.available,
+            detail=reranker.model_name + ("" if reranker.available else f" - failed to load ({reranker.error}); off"),
+        )
     checks["arxiv"] = ReadyCheck(ok=True, detail="enabled" if st.settings.arxiv_enabled else "disabled")
     if not getattr(st, "db_configured", st.db_pool is not None):
         checks["database"] = ReadyCheck(ok=True, detail="not configured (workspace features off)")

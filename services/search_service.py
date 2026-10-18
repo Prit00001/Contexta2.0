@@ -54,12 +54,14 @@ class SearchService:
         arxiv: ArxivClient,
         generator: Generator,
         answer_cache=None,
+        reranker=None,
     ):
         self.s = settings
         self.embedder = embedder
         self.retriever = retriever
         self.arxiv = arxiv
         self.generator = generator
+        self.reranker = reranker
         rewriter = (
             Generator(settings.rewrite_providers, generator.client, settings.llm_timeout)
             if settings.rewrite_providers
@@ -77,6 +79,7 @@ class SearchService:
             embedder=embedder, library=retriever, arxiv=arxiv, arxiv_enabled=settings.arxiv_enabled,
             arxiv_budget_s=settings.arxiv_budget_s, min_score=settings.min_score_for(embedder.backend),
             hybrid_bm25_enabled=settings.hybrid_bm25_enabled,
+            reranker=reranker, rerank_candidates=settings.rerank_candidates,
         )  # fmt: skip
         # core.cache: Redis-backed (shared across instances) when REDIS_URL is set, else per process
         self.cache = answer_cache if answer_cache is not None else InMemoryAnswerCache(settings.answer_cache_ttl)

@@ -14,6 +14,9 @@ All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://
 - Phase 3 harness: `--retrievers hybrid,hybrid_bm25,dense,keyword` and `--decoys` (keyword-stuffed decoy abstracts, brief §3.4); offline hash-embedding baseline in EVALUATION_REPORT §5c.
 - **`POST /ask/stream`** (P2-13): server-sent events (`stage`, `sources`, `token`, `reset`, `done`, `error`) over the same workflow, cache and rate limit as `/ask`; `done` is the `/ask` response. The UI streams library answers. The LLM HTTP bridge passes provider SSE through chunk by chunk; the fake LLM server streams with `--delay`.
 
+- **Reranking** (P2-07), `RERANK_MODEL` (off by default): fastembed ONNX cross-encoder reorders the top `RERANK_CANDIDATES` sources that passed `MIN_SCORE`; `/ready` reports load failures; `eval/run_eval.py --rerank`, and retrieval p95 latency in the eval summary.
+- **Claim-checker measurement tooling**: `--with-llm` + `CLAIM_CHECK=llm` writes `eval/claims_to_label.csv`; `--score-claims` scores the checker against human labels.
+
 ### Changed
 - `Generator.judge` renamed `Generator.complete` (shared by claim checking and rewriting).
 

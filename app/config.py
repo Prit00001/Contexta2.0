@@ -63,6 +63,8 @@ class Settings(BaseModel):
     cache_dir: Path = Path(".cache")
     model_cache_dir: Optional[str] = None
     min_score: Optional[float] = Field(None, ge=-1.0, le=1.0)  # None -> DEFAULT_MIN_SCORE[backend]
+    rerank_model: str = ""  # P2-07: e.g. Xenova/ms-marco-MiniLM-L-6-v2 (~80 MB); empty = no reranking
+    rerank_candidates: int = Field(20, ge=2, le=100)
     hybrid_bm25_enabled: bool = False  # P2-FR-03: off by default - see EVALUATION_REPORT.md for why
     # the measured improvement doesn't yet justify flipping the real default (it only covers
     # local-only retrieval; arXiv-mixed retrieval, the actual default path, is structurally

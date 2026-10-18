@@ -33,6 +33,7 @@ FastAPI · LangGraph · LangChain · FAISS · fastembed (all-MiniLM-L6-v2, ONNX)
 | Metrics | `GET /metrics` (Prometheus): answers by outcome, latency, per-stage durations, LLM calls, 429s — no user content |
 | Workspace Q&A on the graph | `/workspaces/{id}/ask` returns the same `outcome` / `claims` / `citation_check` / `workflow` as `/ask` |
 | Fast offline start | Uncached model + no network: 46 s → ~5 s before falling back to hash embeddings |
+| Reranking | `RERANK_MODEL=Xenova/ms-marco-MiniLM-L-6-v2` (off by default): a small cross-encoder reorders the top 20 sources; measure with `eval/run_eval.py --rerank` |
 | Streaming answers | `POST /ask/stream` (server-sent events): sources first, then answer tokens as the model writes, then the full validated `/ask` response; the web page uses it |
 
 ### Phase 3 (experimental, off by default)
