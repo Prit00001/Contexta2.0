@@ -26,7 +26,7 @@ FastAPI · LangGraph · LangChain · FAISS · fastembed (all-MiniLM-L6-v2, ONNX)
 | Feature | Notes |
 |---|---|
 | Evaluation harness | 143-question set (unreviewed), retrieval metrics, `--with-llm` answer metrics, `--sweep-min-score` calibration — [EVALUATION_REPORT](docs/evaluation/EVALUATION_REPORT.md) |
-| `MIN_SCORE` per backend | Unset → `0.2` on MiniLM, `0.075` on hash embeddings (the old 0.2 left 26% of answerable questions with no sources there) |
+| `MIN_SCORE` per backend | Unset → `0.225` on MiniLM, `0.075` on hash embeddings, both calibrated by `make eval-sweep` (the old 0.2 left 26% of answerable questions with no sources on hash embeddings) |
 | Claim-support check | `CLAIM_CHECK=llm` (off by default): each cited claim marked `supported` / `not_supported` / `unknown` — verbatim quotes locally, the rest by one LLM-judge call |
 | Hybrid BM25 | `HYBRID_BM25_ENABLED=true` (off by default) — [ADR-003](docs/decisions/ADR-003-hybrid-retrieval.md) |
 | Shared state | With `REDIS_URL`, answer cache and `/ask` rate limit are shared across instances; in-memory fallback if Redis is down |
@@ -174,7 +174,7 @@ All settings come from environment variables (or `.env`) and are validated at st
 | `LLM_MAX_ATTEMPTS` | `2` | Generation attempts per question (1–3) |
 | `QUERY_REWRITE` | `off` | Phase 3 experiment: `single` / `multi` / `decompose` / `selective` |
 | `CLAIM_CHECK` | `off` | `llm`: check cited claims against their sources (+1 LLM call per uncached answer) |
-| `MIN_SCORE` | per backend | Unset: `0.2` (MiniLM), `0.075` (hash embeddings, incl. fallback) |
+| `MIN_SCORE` | per backend | Unset: `0.225` (MiniLM), `0.075` (hash embeddings, incl. fallback) — both calibrated |
 | `REDIS_URL` | – | Shared answer cache + rate limits across instances |
 | `ARXIV_ENABLED` | `true` | Live arXiv search |
 | `RATE_LIMIT_PER_MIN` | `20` | Per client IP on `/ask` |
@@ -210,7 +210,7 @@ Current: **241 passed** (Python 3.13, with Postgres 16 + pgvector and a local `r
 ## Known limitations
 
 - Citation validation is **marker-level** by default: it proves `[n]` points to a retrieved source, not that the source supports the claim (`verification: "marker_only"`). `CLAIM_CHECK=llm` adds an LLM-judge support check, but the judge's own precision has **not been measured** yet.
-- `MIN_SCORE` for MiniLM is still the informal 0.2 — the calibration sweep has only run on hash embeddings (the model couldn't be downloaded in the build sandbox).
+- `MIN_SCORE` is calibrated on the LLM-drafted, unreviewed eval set; recheck after the human review.
 - The evaluation questions were LLM-drafted and are not yet human-reviewed; treat every quality number as provisional.
 - The library is 25 curated abstracts; arXiv search is keyword-based and best-effort.
 - Live providers, arXiv and the model download were exercised only through mocks/stubs in Phase 1; `langchain-openai` sends `max_completion_tokens`, whose support by Gemini's OpenAI-compatible endpoint is unverified.

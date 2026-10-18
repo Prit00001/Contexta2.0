@@ -38,7 +38,7 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 | `CACHE_DIR` | `.cache` (`/tmp/contexta-cache` on Vercel) | Library embedding cache (`embeddings.npz`) |
 | `RERANK_MODEL` | – | P2-07: cross-encoder reranking, e.g. `Xenova/ms-marco-MiniLM-L-6-v2` (~80 MB, downloaded at startup; not baked into the Docker image). Reorders sources that passed `MIN_SCORE`, never adds any. Unloadable → off, reported by `/ready` |
 | `RERANK_CANDIDATES` | `20` | How many retrieved sources the reranker scores before keeping `top_k` |
-| `MIN_SCORE` | per backend | Hybrid-score cut for library/arXiv sources, [-1, 1]. Unset: `0.2` on fastembed, `0.075` on hash embeddings (incl. the fallback) — calibrated with `eval/run_eval.py --sweep-min-score` |
+| `MIN_SCORE` | per backend | Hybrid-score cut for library/arXiv sources, [-1, 1]. Unset: `0.225` on fastembed (MiniLM), `0.075` on hash embeddings (incl. the fallback) — calibrated with `eval/run_eval.py --sweep-min-score` |
 | `ARXIV_ENABLED` | `true` | Global switch; per request `use_arxiv` |
 | `ARXIV_MAX_RESULTS` | `12` | 1–50 |
 | `ARXIV_BUDGET_S` | `9` | Total arXiv time budget per request |

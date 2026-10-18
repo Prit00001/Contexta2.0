@@ -43,8 +43,9 @@ KNOWN_PROVIDERS = ("groq", "gemini", "openrouter", "custom")
 # Default MIN_SCORE per *effective* embedding backend (P2-FR-01), used when MIN_SCORE is unset.
 # hash: calibrated with `eval/run_eval.py --sweep-min-score` (EVALUATION_REPORT.md section 5b) - the old
 # 0.2 left 26% of answerable eval questions with no sources at all on hash embeddings.
-# fastembed (MiniLM): 0.2 is the Phase 1 informal value; not yet swept (model not downloadable here).
-DEFAULT_MIN_SCORE = {"fastembed": 0.2, "hash": 0.075}
+# fastembed (MiniLM): 0.225 from the same sweep on real embeddings (EVALUATION_REPORT section 5d.1;
+# was the informal Phase 1 value 0.2).
+DEFAULT_MIN_SCORE = {"fastembed": 0.225, "hash": 0.075}
 
 # field name -> environment variable (only where they differ from FIELD.upper())
 _ENV_NAMES = {
