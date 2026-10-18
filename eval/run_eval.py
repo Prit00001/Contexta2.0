@@ -345,7 +345,12 @@ async def main_async(args: argparse.Namespace) -> None:
         from rewrite_eval import markdown_table, parse_modes, parse_retrievers, run_rewrite_comparison
 
         report = await run_rewrite_comparison(
-            questions, parse_modes(args.rewrite), parse_retrievers(args.retrievers), decoys=args.decoys, pace=args.pace
+            questions,
+            parse_modes(args.rewrite),
+            parse_retrievers(args.retrievers),
+            decoys=args.decoys,
+            pace=args.pace,
+            cache_path=Path(args.rewrite_cache) if args.rewrite_cache else None,
         )
         out = ROOT / "rewrite_report.json"
         out.write_text(json.dumps(report, indent=2, default=str))
@@ -421,6 +426,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--score-claims", metavar="CSV", help="score the claim checker against a labelled claims_to_label.csv"
+    )
+    parser.add_argument(
+        "--rewrite-cache", metavar="JSON", help="with --rewrite: reuse/store rewrites here to save provider quota"
     )
     parser.add_argument(
         "--pace", type=float, default=0.0, help="seconds to wait between LLM-calling questions (free-tier rate limits)"

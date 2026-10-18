@@ -137,3 +137,39 @@ def test_claim_sheet_round_trip(tmp_path):
     }  # fmt: skip
     assert scores["llm_judge"]["accuracy"] == 0.0 and scores["quote"]["accuracy"] == 1.0
     assert "only 2 rows labelled" in claim_labels.markdown(scores).lower()
+
+
+def test_rewrite_cache_saves_quota_but_reports_production_cost(monkeypatch, tmp_path):
+    import asyncio
+
+    import rewrite_eval
+    from run_eval import load_questions
+
+    from app.config import get_settings
+
+    calls = []
+
+    class CountingRewriter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def complete(self, messages):
+            calls.append(1)
+            return '{"queries": ["low-rank adaptation"]}', []
+
+    monkeypatch.setattr(rewrite_eval, "Generator", CountingRewriter)
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    monkeypatch.setenv("REWRITE_GAP_SCORE", "1")  # selective always fires
+    get_settings.cache_clear()
+    cache = tmp_path / "rewrites.json"
+    try:
+        questions = load_questions(limit=5)
+        first = asyncio.run(rewrite_eval.run_rewrite_comparison(questions, ["multi", "selective"], cache_path=cache))
+        assert len(calls) == 5  # selective reused multi's rewrites (same prompt)
+        second = asyncio.run(rewrite_eval.run_rewrite_comparison(questions, ["multi"], cache_path=cache))
+    finally:
+        get_settings.cache_clear()
+    assert len(calls) == 5  # second run: all from cache
+    for report in (first, second):
+        assert report["conditions"]["multi/hybrid"]["summary"]["cost"]["llm_calls"] == 5
+    assert first["conditions"]["selective/hybrid"]["summary"]["cost"]["llm_calls"] == 5

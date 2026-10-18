@@ -30,7 +30,9 @@ keyword overlap), ``hybrid_bm25`` (plus RRF-fused BM25, ADR-003), ``dense`` (cos
 from __future__ import annotations
 
 import asyncio
+import json
 import time
+from pathlib import Path
 
 import httpx
 from run_eval import _mean, ndcg_at_k, recall_at_k, reciprocal_rank
@@ -39,7 +41,7 @@ from app.config import get_settings
 from core.embeddings import Embedder
 from core.generator import Generator
 from core.lc_retriever import ResearchRetriever
-from core.query_rewrite import MODES, fuse, retrieval_queries, rewrite_question
+from core.query_rewrite import MODES, fuse, prompt_mode, retrieval_queries, rewrite_question
 from core.retriever import Retriever
 from core.sources import normalize_source
 from core.text import keywords
@@ -121,6 +123,7 @@ async def run_rewrite_comparison(
     retrievers: list[str] | None = None,
     decoys: bool = False,
     pace: float = 0.0,
+    cache_path: Path | None = None,
 ) -> dict:
     retrievers = retrievers or ["hybrid"]
     settings = get_settings()
@@ -147,15 +150,20 @@ async def run_rewrite_comparison(
         "decoys": len(corpus) - len(DOCUMENTS),
         "conditions": {},
     }
+    cache = json.loads(cache_path.read_text()) if cache_path is not None and cache_path.exists() else None
+    if cache_path is not None and cache is None:
+        cache = {}
     async with httpx.AsyncClient() as client:
         rewriter = Generator(specs, client, settings.llm_timeout)
         for mode in modes:
             plans = []
             for q in questions:
-                plan = await _plan(q, mode, rankers, rewriter, settings)
-                if pace and plan["llm_calls"]:
+                plan = await _plan(q, mode, rankers, rewriter, settings, cache)
+                if pace and plan["fresh_call"]:
                     await asyncio.sleep(pace)  # stay under free-tier rate limits (--pace)
                 plans.append(plan)
+            if cache_path is not None:
+                cache_path.write_text(json.dumps(cache, indent=1, ensure_ascii=False))
             for kind in retrievers:
                 rows = [
                     await _score(q, plan, kind, rankers, embedder, doc_vecs, min_score)
@@ -165,16 +173,29 @@ async def run_rewrite_comparison(
     return report
 
 
-async def _plan(q: dict, mode: str, rankers: _Rankers, rewriter, settings) -> dict:
+async def _plan(q: dict, mode: str, rankers: _Rankers, rewriter, settings, cache: dict | None = None) -> dict:
     """Decide the queries for one question under one condition - once, shared by every retriever.
-    ``selective`` judges weakness on the hybrid ranking, as /ask does."""
+    ``selective`` judges weakness on the hybrid ranking, as /ask does.
+
+    ``cache`` (``--rewrite-cache``) maps "<prompt mode>|<question>" to a previous successful rewrite, so
+    reruns and ``selective`` (same prompt as ``multi``) don't spend provider quota again. A cached
+    rewrite still counts as one LLM call with its original latency: the report describes what the
+    condition costs in production, not what this run spent. ``plan["fresh_call"]`` says whether a
+    real call was made now (used for pacing)."""
     question = q["question"]
-    plan = {"rewrites": None, "llm_calls": 0, "rewrite_ms": 0.0, "diagnostics": []}
+    plan = {"rewrites": None, "llm_calls": 0, "rewrite_ms": 0.0, "diagnostics": [], "fresh_call": False}
 
     async def rewrite() -> None:
-        t0 = time.perf_counter()
-        plan["rewrites"], plan["diagnostics"] = await rewrite_question(question, mode, rewriter.complete)
-        plan["rewrite_ms"] = (time.perf_counter() - t0) * 1000
+        key = f"{prompt_mode(mode)}|{question}"
+        if cache is not None and key in cache:
+            plan["rewrites"], plan["rewrite_ms"] = cache[key]["rewrites"], cache[key]["ms"]
+        else:
+            t0 = time.perf_counter()
+            plan["rewrites"], plan["diagnostics"] = await rewrite_question(question, mode, rewriter.complete)
+            plan["rewrite_ms"] = (time.perf_counter() - t0) * 1000
+            plan["fresh_call"] = True
+            if cache is not None and plan["rewrites"] is not None:  # never cache a failure
+                cache[key] = {"rewrites": plan["rewrites"], "ms": round(plan["rewrite_ms"], 1)}
         plan["llm_calls"] = 1
 
     if mode in ("single", "multi", "decompose"):
