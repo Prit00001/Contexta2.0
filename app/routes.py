@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
-from collections import defaultdict, deque
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
@@ -19,33 +17,12 @@ from app.schemas import (
     ReadyCheck,
     ReadyResponse,
 )
+from core import metrics
 from core.pdf import chunk, extract_pages
 from core.storage import safe_filename
 
 router = APIRouter()
 log = logging.getLogger("contexta.api")
-
-
-class RateLimiter:
-    """Sliding-window limiter per client IP. Protects your free-tier API keys from abuse."""
-
-    def __init__(self, per_minute: int):
-        self.per_minute = per_minute
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
-
-    def allow(self, ip: str) -> bool:
-        if self.per_minute <= 0:
-            return True
-        now = time.monotonic()
-        q = self._hits[ip]
-        while q and now - q[0] > 60:
-            q.popleft()
-        if len(q) >= self.per_minute:
-            return False
-        q.append(now)
-        if len(self._hits) > 5000:  # bound memory
-            self._hits = defaultdict(deque, {k: v for k, v in self._hits.items() if v})
-        return True
 
 
 def _client_ip(request: Request) -> str:
@@ -68,8 +45,9 @@ def _request_id(request: Request) -> str:
     return getattr(request.state, "request_id", "")
 
 
-def _check_rate_limit(request: Request) -> None:
-    if not request.app.state.limiter.allow(_client_ip(request)):
+async def _check_rate_limit(request: Request, endpoint: str) -> None:
+    if not await request.app.state.limiter.allow(f"ask:{_client_ip(request)}"):
+        metrics.RATE_LIMITED.labels(endpoint).inc()
         log.info("rate limited", extra={"event": "ratelimit", "category": "rate_limited"})
         raise HTTPException(
             429,
@@ -79,6 +57,9 @@ def _check_rate_limit(request: Request) -> None:
 
 
 def _log_result(kind: str, question: str, result: dict, **fields) -> None:
+    metrics.ANSWERS.labels(kind, result["outcome"], str(bool(result["cached"])).lower()).inc()
+    if not result["cached"] and (total := result.get("timings_ms", {}).get("total")) is not None:
+        metrics.ANSWER_SECONDS.labels(kind).observe(total / 1000)
     category = {"insufficient_evidence": "insufficient_evidence", "extractive_fallback": "llm_unavailable"}.get(
         result["outcome"]
     )
@@ -121,7 +102,7 @@ async def ask(body: AskRequest, request: Request):
     """Runs the LangGraph research workflow: validate -> retrieve (FAISS library + optional live arXiv)
     -> generate (LLM provider chain) -> validate citations -> respond. Falls back to an extractive
     answer when no LLM succeeds, and says so when nothing relevant is found (`outcome`)."""
-    _check_rate_limit(request)
+    await _check_rate_limit(request, "ask")
     result = await request.app.state.service.ask(body.question, body.top_k, body.use_arxiv)
     _log_result("ask", body.question, result, top_k=body.top_k, use_arxiv=body.use_arxiv)
     return {**result, "request_id": _request_id(request)}
@@ -142,7 +123,7 @@ async def ask_pdf(
     file: UploadFile = File(...),
     top_k: int = Form(5, ge=1, le=10),
 ):
-    _check_rate_limit(request)
+    await _check_rate_limit(request, "ask_pdf")
 
     max_bytes = request.app.state.settings.max_pdf_bytes
     data = await file.read(max_bytes + 1)  # never buffer more than the limit
@@ -257,3 +238,12 @@ async def ready(request: Request):
         status = "degraded"
     body = ReadyResponse(status=status, checks=checks)
     return JSONResponse(body.model_dump(), status_code=503 if status == "not_ready" else 200)
+
+
+@router.get("/metrics", include_in_schema=False)
+async def metrics_endpoint(request: Request):
+    """Prometheus exposition format. No user content (see core.metrics); disable with METRICS_ENABLED=false."""
+    if not request.app.state.settings.metrics_enabled:
+        raise HTTPException(404, "Not Found")
+    body, content_type = metrics.render()
+    return Response(body, media_type=content_type)

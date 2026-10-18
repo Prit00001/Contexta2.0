@@ -43,9 +43,9 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 
 | Variable | Default | Notes |
 |---|---|---|
-| `RATE_LIMIT_PER_MIN` | `20` | Per client IP on `/ask`, `/ask-pdf`; `0` disables |
+| `RATE_LIMIT_PER_MIN` | `20` | Per client IP on `/ask`, `/ask-pdf`; `0` disables. Shared across instances when `REDIS_URL` is set |
 | `TRUST_PROXY_HEADERS` | `true` | Use the right-most `X-Forwarded-For` hop (the one your platform's proxy appends). Set `false` when clients connect directly |
-| `ANSWER_CACHE_TTL` | `3600` | Seconds; only LLM answers (and empty results) are cached |
+| `ANSWER_CACHE_TTL` | `3600` | Seconds; only LLM answers (and empty results) are cached. In Redis (shared) when `REDIS_URL` is set, else per process |
 | `ALLOWED_ORIGINS` | `*` | CORS, comma-separated |
 | `APP_SITE_URL` | `http://localhost:8000` | Sent to OpenRouter |
 | `MAX_PDF_MB` | `4` | `/ask-pdf` upload limit (Vercel rejects bodies > ~4.5 MB) |
@@ -57,6 +57,7 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 |---|---|---|
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `LOG_FORMAT` | `text` | `json`: one object per line (Docker image default) |
+| `METRICS_ENABLED` | `true` | `GET /metrics` (Prometheus). Counters/histograms by endpoint, outcome, stage, provider; no user content |
 
 Logged per request: `request_id`, method, path, status, `duration_ms`, failure `category`. Per workflow stage: `stage`, `status`, `duration_ms`. Per answer: `outcome`, number of sources, provider, `question_len`, `question_sha8`. Never logged: question text, API keys, DSNs (a redaction filter is a backstop). LangSmith tracing is not enabled by the app; it would only activate if `LANGSMITH_TRACING`/`LANGCHAIN_TRACING_V2` were set, which sends prompts to LangSmith — leave unset unless intended.
 
@@ -71,7 +72,7 @@ Logged per request: `request_id`, method, path, status, `duration_ms`, failure `
 | `STORAGE_DIR` | `.storage` | Local backend root |
 | `STORAGE_BUCKET` | `documents` | Supabase bucket |
 | `MAX_UPLOAD_MB` | `20` | Workspace uploads |
-| `REDIS_URL` | – | Shared workspace rate limit; in-memory fallback |
+| `REDIS_URL` | – | Shared answer cache, `/ask` and workspace rate limits across instances; falls back to in-memory if unset or unreachable |
 | `WORKSPACE_RATE_LIMIT_PER_MIN` | `60` | |
 
 ## Safe local setup

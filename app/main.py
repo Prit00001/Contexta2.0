@@ -12,13 +12,14 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.observability import RequestContextMiddleware, configure_logging
-from app.routes import RateLimiter, router
+from app.routes import router
 from app.routes_admin import router as admin_router
 from app.routes_workspace import router as workspace_router
 from core import db
 from core.embeddings import Embedder
 from core.generator import Generator
-from core.rate_limit import make_limiter
+from core.cache import make_answer_cache
+from core.rate_limit import make_limiter, make_redis
 from core.retriever import Retriever
 from data.documents import DOCUMENTS
 from services.arxiv_client import ArxivClient
@@ -44,8 +45,12 @@ async def lifespan(app: FastAPI):
     arxiv = ArxivClient(client, s.arxiv_max_results, s.arxiv_cache_ttl)
     app.state.settings = s
     app.state.embedder, app.state.retriever, app.state.generator = embedder, retriever, generator
-    app.state.service = SearchService(s, embedder, retriever, arxiv, generator)
-    app.state.limiter = RateLimiter(s.rate_limit_per_min)
+    redis = make_redis(s.redis_url)  # shared answer cache + rate limits across instances (P2-FR-07)
+    app.state.redis = redis
+    app.state.service = SearchService(
+        s, embedder, retriever, arxiv, generator, answer_cache=make_answer_cache(redis, s.answer_cache_ttl)
+    )
+    app.state.limiter = make_limiter(redis, s.rate_limit_per_min)
     app.state.db_configured = bool(s.database_url)
     app.state.db_pool = None
     if s.database_url:
@@ -57,18 +62,21 @@ async def lifespan(app: FastAPI):
                 type(exc).__name__,
                 extra={"event": "startup.db", "status": "error", "category": "internal"},
             )
-    app.state.workspace_limiter = make_limiter(s.redis_url, s.workspace_rate_limit_per_min)
+    app.state.workspace_limiter = make_limiter(redis, s.workspace_rate_limit_per_min)
     log.info(
-        "Ready: %d docs, embeddings=%s%s, LLM providers=%s, db=%s",
+        "Ready: %d docs, embeddings=%s%s, LLM providers=%s, db=%s, cache=%s",
         retriever.size,
         embedder.backend,
         " (FALLBACK)" if embedder.degraded else "",
         generator.provider_names or "none (extractive mode)",
         "connected" if app.state.db_pool else ("UNREACHABLE" if s.database_url else "not configured"),
+        "redis" if redis is not None else "memory",
         extra={"event": "startup", "status": "degraded" if embedder.degraded else "ok"},
     )
     yield
     await client.aclose()
+    if redis is not None:
+        await redis.aclose()
     if app.state.db_pool:
         app.state.db_pool.closeall()
 

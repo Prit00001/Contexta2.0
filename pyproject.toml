@@ -26,7 +26,7 @@ select = ["E4", "E7", "E9", "F"]
 # the next time they are changed, so reviews never mix reformatting with behaviour changes.
 exclude = [
     "app/deps.py", "app/routes_admin.py", "app/routes_workspace.py",
-    "core/auth.py", "core/chunking.py", "core/db.py", "core/parsers.py", "core/pdf.py", "core/rate_limit.py",
+    "core/auth.py", "core/chunking.py", "core/db.py", "core/parsers.py", "core/pdf.py",
     "core/retriever.py", "core/text.py", "core/vector_store.py",
     "data/documents.py", "scripts/migrate.py",
     "services/arxiv_client.py", "services/ingestion.py", "services/retrieval.py", "services/worker.py",

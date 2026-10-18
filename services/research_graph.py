@@ -25,6 +25,7 @@ from typing import Annotated, Any, Literal, Optional, TypedDict
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
+from core import metrics
 from core.citations import validate_citations
 from core.generator import Generator, extractive_answer
 from core.prompts import RETRY_FEEDBACK
@@ -76,6 +77,7 @@ def _traced(stage: str):
             update, status = await fn(state, config)
             ms = round((time.perf_counter() - t0) * 1000)
             category = update.pop("_category", None)
+            metrics.STAGE_SECONDS.labels(stage, status).observe(time.perf_counter() - t0)
             log.info(
                 "stage %s %s",
                 stage,

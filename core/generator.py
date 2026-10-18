@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from app.config import ProviderSpec
+from core import metrics
 from core.citations import strip_invalid_markers
 from core.llm import LLMError, invoke_chat, make_chat_model
 from core.prompts import build_prompt_messages
@@ -92,6 +93,7 @@ class Generator:
                 text = await invoke_chat(self._models[p.name], p, messages)
             except LLMError as exc:
                 self._cooldown_until[p.name] = time.monotonic() + exc.cooldown
+                metrics.LLM_CALLS.labels(p.name, "error").inc()
                 warnings.append(f"{p.name}: {exc}")
                 log.warning(
                     "LLM provider %s failed: %s",
@@ -107,6 +109,7 @@ class Generator:
                     },
                 )
                 continue
+            metrics.LLM_CALLS.labels(p.name, "ok").inc()
             log.info(
                 "LLM provider %s answered",
                 p.name,

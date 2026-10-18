@@ -157,6 +157,8 @@ pillow==10.4.0
     #   -r requirements.in
     #   fastembed
     #   pytesseract
+prometheus-client==0.26.0
+    # via -r requirements.in
 protobuf==7.36.2
     # via onnxruntime
 psycopg2-binary==2.9.13

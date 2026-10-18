@@ -88,6 +88,7 @@ class Settings(BaseModel):
     # observability
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["text", "json"] = "text"
+    metrics_enabled: bool = True
 
     # workspace platform (optional)
     database_url: str = Field("", repr=False)

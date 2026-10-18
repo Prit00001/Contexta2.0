@@ -244,6 +244,10 @@ pillow==10.4.0
     #   pytesseract
 pluggy==1.7.0
     # via pytest
+prometheus-client==0.26.0
+    # via
+    #   -c requirements.txt
+    #   -r requirements.in
 protobuf==7.36.2
     # via
     #   -c requirements.txt

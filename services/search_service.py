@@ -17,6 +17,7 @@ import numpy as np
 from fastapi import HTTPException
 
 from app.config import Settings
+from core.cache import InMemoryAnswerCache, cache_key
 from core.embeddings import Embedder
 from core.generator import Generator
 from core.lc_retriever import PdfChunkRetriever, ResearchRetriever, _unit
@@ -46,7 +47,13 @@ def _source_out(s: dict, marker: int) -> dict:
 
 class SearchService:
     def __init__(
-        self, settings: Settings, embedder: Embedder, retriever: Retriever, arxiv: ArxivClient, generator: Generator
+        self,
+        settings: Settings,
+        embedder: Embedder,
+        retriever: Retriever,
+        arxiv: ArxivClient,
+        generator: Generator,
+        answer_cache=None,
     ):
         self.s = settings
         self.embedder = embedder
@@ -59,24 +66,20 @@ class SearchService:
             arxiv_budget_s=settings.arxiv_budget_s, min_score=settings.min_score,
             hybrid_bm25_enabled=settings.hybrid_bm25_enabled,
         )  # fmt: skip
-        self._answers: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
+        # core.cache: Redis-backed (shared across instances) when REDIS_URL is set, else per process
+        self.cache = answer_cache if answer_cache is not None else InMemoryAnswerCache(settings.answer_cache_ttl)
         # Per-instance cache of PDF chunk embeddings, so follow-up questions on the same
         # file skip re-embedding when they land on a warm instance. Best-effort on serverless.
         self._pdf_vecs: OrderedDict[str, np.ndarray] = OrderedDict()
 
     # ---- cache ---------------------------------------------------------------
-    def _cached(self, key: tuple) -> dict | None:
-        hit = self._answers.get(key)
-        if hit and time.monotonic() - hit[0] < self.s.answer_cache_ttl:
-            self._answers.move_to_end(key)
-            return {**hit[1], "cached": True}
-        return None
+    async def _cached(self, key: tuple) -> dict | None:
+        hit = await self.cache.get(cache_key(key))
+        return {**hit, "cached": True} if hit else None
 
-    def _store(self, key: tuple, response: dict) -> None:
+    async def _store(self, key: tuple, response: dict) -> None:
         if response["llm_used"] or not response["sources"]:  # don't pin a degraded answer in cache
-            self._answers[key] = (time.monotonic(), response)
-            while len(self._answers) > 256:
-                self._answers.popitem(last=False)
+            await self.cache.set(cache_key(key), response)
 
     # ---- graph -> response ---------------------------------------------------
     async def _run(self, retriever, question: str, top_k: int, options: dict, empty_message: str) -> tuple[dict, dict]:
@@ -114,8 +117,8 @@ class SearchService:
     async def ask(self, question: str, top_k: int, use_arxiv: bool) -> dict:
         question = " ".join(question.split())
         use_arxiv = use_arxiv and self.s.arxiv_enabled
-        cache_key = (question.lower(), top_k, use_arxiv)
-        if hit := self._cached(cache_key):
+        key = ("ask", question.lower(), top_k, use_arxiv)
+        if hit := await self._cached(key):
             return hit
 
         t0 = time.perf_counter()
@@ -128,7 +131,7 @@ class SearchService:
             "generate": t["generate_ms"],
             "total": round((time.perf_counter() - t0) * 1000),
         }
-        self._store(cache_key, response)
+        await self._store(key, response)
         return response
 
     async def ask_pdf(self, question: str, chunks: list[dict], top_k: int, filename: str) -> dict:
@@ -140,8 +143,8 @@ class SearchService:
             warnings.append(f"This PDF is long, so only pages 1–{chunks[-1]['page']} were searched.")
 
         doc_key = hashlib.sha1("\x00".join(c["text"] for c in chunks).encode()).hexdigest()
-        cache_key = ("pdf", doc_key, question.lower(), top_k)
-        if hit := self._cached(cache_key):
+        key = ("pdf", doc_key, question.lower(), top_k)
+        if hit := await self._cached(key):
             return hit
 
         t0 = time.perf_counter()
@@ -165,5 +168,5 @@ class SearchService:
             "generate": t["generate_ms"],
             "total": round((time.perf_counter() - t0) * 1000),
         }
-        self._store(cache_key, response)
+        await self._store(key, response)
         return response
