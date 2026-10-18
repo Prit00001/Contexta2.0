@@ -42,6 +42,35 @@ def _hash_embed(texts: list[str]) -> np.ndarray:
     return _normalize(out)
 
 
+def _load_fastembed(model_name: str, cache_dir: str | None):
+    """Load a fastembed model, failing fast when it is neither cached nor downloadable (P2-FR-02).
+
+    fastembed 0.7 does not pass ``TextEmbedding(retries=...)`` through to its downloader, which
+    always makes 3 attempts sleeping 3 + 9 + 27 s - ~42 s offline (measured). So the download is
+    done here with one attempt (~3.7 s offline, measured; fastembed still sleeps 3 s after it) and
+    the model is loaded from the resulting path. A model already in the cache is loaded without
+    any network call.
+    """
+    from pathlib import Path
+
+    from fastembed import TextEmbedding
+    from fastembed.common.utils import define_cache_dir
+
+    for impl in TextEmbedding.EMBEDDINGS_REGISTRY:
+        if any(m.model.lower() == model_name.lower() for m in impl._list_supported_models()):
+            break
+    else:
+        raise ValueError(f"model {model_name} is not supported by fastembed")
+    desc = impl._get_model_description(model_name)
+    root = Path(define_cache_dir(cache_dir))
+    cached = [root / f"models--{desc.sources.hf.replace('/', '--')}"] if desc.sources.hf else []
+    cached.append(root / f"{'fast-' if desc.sources.deprecated_tar_struct else ''}{desc.model.split('/')[-1]}")
+    # Only probe the cache when it plausibly holds the model: a local-only miss also costs a 3 s sleep.
+    local_only = any(p.is_dir() and any(p.iterdir()) for p in cached)
+    path = impl.download_model(desc, str(root), retries=1, local_files_only=local_only)
+    return TextEmbedding(model_name=model_name, cache_dir=cache_dir, specific_model_path=str(path))
+
+
 class Embedder:
     def __init__(self, backend: str, model_name: str, cache_dir: str | None = None):
         self.requested_backend = backend  # what config asked for; differs from .backend after a fallback
@@ -51,19 +80,11 @@ class Embedder:
         self._model = None
         self._lock = threading.Lock()
         if backend == "fastembed":
-            from fastembed import TextEmbedding
-
             try:
-                # Already cached from a previous run: single local lookup, no network at all.
-                self._model = TextEmbedding(model_name=model_name, cache_dir=cache_dir, local_files_only=True)
-            except Exception:
-                try:
-                    # Not cached yet: one real network attempt (not fastembed's default of 3 retries
-                    # with sleeps between them) - fails fast instead of ~45s when offline (P2-FR-02).
-                    self._model = TextEmbedding(model_name=model_name, cache_dir=cache_dir, retries=1)
-                except Exception as exc:  # noqa: BLE001
-                    log.error("fastembed failed to load (%s); using hash embeddings", exc)
-                    self.backend = "hash"
+                self._model = _load_fastembed(model_name, cache_dir)
+            except Exception as exc:  # noqa: BLE001
+                log.error("fastembed failed to load (%s); using hash embeddings", exc)
+                self.backend = "hash"
         else:
             self.backend = "hash"
         self.dim = self.embed_sync(["probe"]).shape[1]

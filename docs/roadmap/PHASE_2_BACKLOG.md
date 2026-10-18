@@ -22,7 +22,7 @@ Priority: **P0** do first · **P1** next · **P2** when justified by P2-01 resul
 | P2-14 | Conversation history | Not implemented; each request independent | P2 | Only with a clear use case; requires storage + privacy review |
 | P2-15 | Observability: metrics + tracing | JSON logs with stage durations exist; no metrics endpoint or traces | P1 | Prometheus counters/histograms per stage and outcome; optional OpenTelemetry / LangSmith (off by default) |
 | P2-16 | Code-quality tightening | 26 legacy files excluded from `ruff format`; import sorting (`I`) off | P2 | Exclude list empty; `I` and `B` rule sets on |
-| P2-17 | Model download resilience | fastembed retries the download for ~45 s at startup when offline before falling back | P1 | **Done** (2026-10-17) — `core/embeddings.py`: `local_files_only=True` when cached (0.45s, measured), `retries=1` otherwise; `tests/test_embeddings.py` |
+| P2-17 | Model download resilience | fastembed retries the download for ~45 s at startup when offline before falling back | P1 | **Done** (2026-10-18) — `core/embeddings.py` drives fastembed's downloader directly with one attempt: offline + uncached start 46 s → 5.2 s (measured, incl. ~1.4 s import); cached model loads with no network call. The 2026-10-17 fix passed `retries=1` to `TextEmbedding`, which fastembed 0.7 silently ignores (still 3+9+27 s of sleeps). `tests/test_embeddings.py` asserts on the downloader call |
 
 ## Out of scope for Phase 2
 Query rewriting and local inference (Phase 3 — see the research brief), multi-agent workflows, authentication for the public `/ask` demo endpoint (product decision A-01).
