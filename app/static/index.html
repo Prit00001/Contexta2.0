@@ -19,6 +19,7 @@
       --accent-ink: #ffffff;
       --accent-soft: #eef2ff;
       --err: #dc2626;
+      --warn: #b45309;
       --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
       color-scheme: light;
     }
@@ -35,6 +36,7 @@
         --accent-ink: #0c0c0e;
         --accent-soft: #1e1b3a;
         --err: #f87171;
+        --warn: #fbbf24;
         color-scheme: dark;
       }
     }
@@ -286,6 +288,30 @@
       color: var(--accent-ink)
     }
 
+    /* evidence: sentences without a citation, or that a claim check found unsupported */
+    .claim.uncited {
+      text-decoration: underline dotted var(--faint);
+      text-underline-offset: 4px;
+      cursor: help
+    }
+
+    .claim.unsupported {
+      text-decoration: underline wavy var(--warn);
+      text-underline-offset: 4px;
+      text-decoration-thickness: 1px;
+      cursor: help
+    }
+
+    .evidence {
+      font-size: 13px;
+      color: var(--muted);
+      margin: 0 0 6px
+    }
+
+    .evidence .flag {
+      color: var(--warn)
+    }
+
     .note {
       font-size: 13px;
       color: var(--muted);
@@ -520,10 +546,52 @@
     /* ---------- rendering ---------- */
     function showError(msg) { $('out').innerHTML = `<p class="err">${esc(msg)}</p>`; }
 
-    function renderAnswer(text) {
+    const citeBtn = (n, sources) => {
+      const s = sources[n - 1];
+      const label = s ? `Source ${n}: ${s.title}` : `Source ${n}`;
+      return `<button type="button" class="cite" data-n="${n}" title="${esc(label)}" aria-label="${esc(label)}">${n}</button>`;
+    };
+
+    function renderAnswer(text, sources) {
       return esc(text).split(/\n{2,}/).map((p) =>
-        '<p>' + p.replace(/\[(\d+)\]/g, '<button type="button" class="cite" data-n="$1" aria-label="Jump to source $1">$1</button>') + '</p>'
+        '<p>' + p.replace(/\[(\d+)\]/g, (_, n) => citeBtn(+n, sources)) + '</p>'
       ).join('');
+    }
+
+    // Sentence-by-sentence from claims[]: flags uncited sentences and ones a claim check found unsupported.
+    function renderClaims(d) {
+      const html = d.claims.map((c) => {
+        const cites = c.markers.map((n) => citeBtn(n, d.sources)).join('');
+        let cls = '', why = '';
+        if (c.status === 'uncited') {
+          cls = ' uncited'; why = 'No citation: this sentence is not tied to a retrieved source.';
+        } else if (c.support === 'not_supported') {
+          cls = ' unsupported'; why = 'An AI check found the cited source does not back this sentence.';
+        }
+        const attrs = why ? ` title="${esc(why)}"` : '';
+        return `<span class="claim${cls}"${attrs}>${esc(c.text)}</span>${cites ? ' ' + cites : ''}`;
+      }).join(' ');
+      return `<p>${html}</p>`;
+    }
+
+    function evidenceSummary(d) {  // returns HTML; every dynamic value is a number or escaped
+      const cc = d.citation_check || {};
+      const n = d.claims.length;
+      if (!n || d.outcome === 'insufficient_evidence') return '';
+      const cited = n - (cc.uncited_claims || 0);
+      const parts = [cited === n ? 'Every sentence cites a source' : `${cited} of ${n} sentences cite a source`];
+      if (cc.verification === 'claim_support') {
+        const bits = [`${+cc.supported_claims || 0} supported`];
+        if (cc.not_supported_claims) bits.push(`<span class="flag">${+cc.not_supported_claims} not supported</span>`);
+        if (cc.unknown_claims) bits.push(`${+cc.unknown_claims} unchecked`);
+        parts.push('AI claim check: ' + bits.join(', '));
+      }
+      const removed = (cc.removed_markers || []).map((m) => `[${+m}]`);
+      if (removed.length) {
+        const what = removed.length === 1 ? 'a citation to a source that was' : `${removed.length} citations to sources that were`;
+        parts.push(`<span class="flag">removed ${what} never retrieved (${removed.join(' ')})</span>`);
+      }
+      return `<p class="evidence">${parts.join(' · ')}</p>`;
     }
 
     function sourceMeta(s) {
@@ -549,7 +617,8 @@
       }).join('');
       $('out').innerHTML =
         `<p class="status">${esc(status)}</p>` +
-        `<div class="answer">${renderAnswer(d.answer)}</div>` +
+        `<div class="answer">${d.claims && d.claims.length ? renderClaims(d) : renderAnswer(d.answer, d.sources)}</div>` +
+        evidenceSummary(d) +
         (d.warnings || []).map((w) => `<p class="note">${esc(w)}</p>`).join('') +
         (sources ? `<h2>Sources</h2><ol class="srcs">${sources}</ol>` : '');
     }
@@ -557,6 +626,7 @@
     $('out').addEventListener('click', (e) => {
       const b = e.target.closest('.cite'); if (!b) return;
       const el = $('src-' + b.dataset.n); if (!el) return;
+      const excerpt = el.querySelector('details'); if (excerpt) excerpt.open = true;  // [n] opens the cited passage
       el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
       el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1200);
     });
