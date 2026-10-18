@@ -13,6 +13,7 @@ distribution, cost/latency) need a real LLM call per question and are opt-in:
     python eval/run_eval.py --with-llm --limit 10          # quick smoke run
     python eval/run_eval.py --sweep-min-score             # MIN_SCORE calibration curve, offline
     python eval/run_eval.py --rewrite all                 # Phase 3 query-rewrite conditions (LLM calls)
+    python eval/run_eval.py --rewrite off --retrievers all --decoys   # decoy/bias check, offline
 
 Scoped to the local 25-paper library only (arxiv_snapshot.jsonl is not yet populated - see
 eval/dataset/ARXIV_SNAPSHOT.md); every dataset question's gold_document_ids are local doc_0XX IDs.
@@ -318,9 +319,11 @@ def write_markdown(report: dict, path: Path) -> None:
 async def main_async(args: argparse.Namespace) -> None:
     questions = load_questions(limit=args.limit)
     if args.rewrite:
-        from rewrite_eval import markdown_table, parse_modes, run_rewrite_comparison
+        from rewrite_eval import markdown_table, parse_modes, parse_retrievers, run_rewrite_comparison
 
-        report = await run_rewrite_comparison(questions, parse_modes(args.rewrite))
+        report = await run_rewrite_comparison(
+            questions, parse_modes(args.rewrite), parse_retrievers(args.retrievers), decoys=args.decoys
+        )
         out = ROOT / "rewrite_report.json"
         out.write_text(json.dumps(report, indent=2, default=str))
         (ROOT / "rewrite_report.md").write_text(markdown_table(report) + "\n")
@@ -373,6 +376,14 @@ def main() -> None:
         metavar="MODES",
         help="Phase 3: compare query-rewrite conditions (comma list of off,single,multi,decompose,selective "
         "or 'all'); one real LLM call per question per condition",
+    )
+    parser.add_argument(
+        "--retrievers",
+        default="hybrid",
+        help="with --rewrite: hybrid,hybrid_bm25,dense,keyword or 'all' (default hybrid, what /ask uses)",
+    )
+    parser.add_argument(
+        "--decoys", action="store_true", help="with --rewrite: add keyword-stuffed decoy abstracts (brief 3.4)"
     )
     parser.add_argument("--top-k", type=int, default=10, help="retrieval depth to score against (default 10)")
     parser.add_argument("--limit", type=int, default=None, help="only run the first N questions (smoke runs)")

@@ -106,6 +106,39 @@ that leave no answerable question without sources.
   runs where the model loads; the harness prints the recommended value and writes
   `eval/min_score_sweep_fastembed.json`.
 
+## 5c. Phase 3 — retriever comparison and decoy check, no rewriting (2026-10-18)
+
+Command: `PYTHONPATH=. python eval/run_eval.py --rewrite off --retrievers all [--decoys]` (offline,
+no LLM; `eval/rewrite_eval.py`). **Hash embeddings only** — MiniLM isn't downloadable here, and hash
+embeddings are essentially lexical, so these numbers must not be read as the production picture.
+
+Without decoys (110 answerable questions, overall):
+
+| Retriever | R@1 | R@5 | MRR | nDCG@10 |
+|---|---|---|---|---|
+| hybrid (/ask) | 0.665 | 0.920 | 0.861 | 0.867 |
+| hybrid_bm25 | 0.702 | 0.952 | 0.899 | 0.903 |
+| dense | 0.565 | 0.830 | 0.764 | 0.775 |
+| keyword (BM25) | 0.752 | 0.977 | 0.929 | 0.933 |
+
+With 220 decoys (two per answerable question, generated from its keywords: a short `literal` one and
+a `repetition` one — brief §3.4; `make_decoys`):
+
+| Retriever | R@5 | Decoy outranks all gold (overall) | literal / repetition |
+|---|---|---|---|
+| hybrid | 0.661 | 0.964 | 0.964 / 0.964 |
+| hybrid_bm25 | 0.694 | 0.982 | 0.964 / 0.982 |
+| dense | 0.535 | 0.955 | 0.936 / 0.955 |
+| keyword | 0.682 | 0.982 | 0.973 / 0.982 |
+
+Reading: on hash embeddings every retriever is almost completely captured by keyword-stuffed
+decoys — expected, since all four signals are lexical here. The decoys are an adversarial upper bound
+(they contain exactly the question's keywords). What this sets up, once MiniLM and a real rewriter are
+available: (1) whether dense MiniLM resists literal/repetition decoys where hash cannot, and (2) the
+brief's masking-vs-mitigating question — does `--rewrite multi|decompose --decoys` lower the decoy
+win rate, or only shift scores? Without decoys, BM25 alone beats the hybrid on hash embeddings;
+ADR-003's choice of hybrid was measured on MiniLM, so this is not a reason to change it.
+
 ## 6. Known limitations of this dataset
 
 - Unreviewed (see §1) — treat as provisional.

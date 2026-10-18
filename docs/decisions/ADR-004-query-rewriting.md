@@ -65,5 +65,6 @@ the expected number of calls (0 / 1 / 1 / 1 / ≤1 per question) and that `off` 
 - Default behaviour, latency and cost are unchanged (`off`).
 - Turning a mode on costs one extra LLM call per uncached request (fewer for `selective`) and adds
   the rewrite latency before retrieval.
-- Not yet built: the adversarial decoy subset from brief §3.4, and per-retriever reporting
-  (dense / keyword-only / hybrid) — the harness runs whichever retriever is configured.
+- Decoy subset and per-retriever reporting (brief §3.4) were added afterwards: `--decoys`,
+  `--retrievers hybrid,hybrid_bm25,dense,keyword`. Offline baseline (hash embeddings, no rewriting)
+  in EVALUATION_REPORT §5c: decoys outrank gold on 94–98% of questions for every retriever.

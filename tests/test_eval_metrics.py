@@ -82,14 +82,33 @@ def test_rewrite_comparison_off_matches_baseline_and_counts_calls(monkeypatch):
         baseline = asyncio.run(run_retrieval(questions))
     finally:
         get_settings.cache_clear()
-    off = {r["id"]: r for r in report["conditions"]["off"]["detail"]}
+    off = {r["id"]: r for r in report["conditions"]["off/hybrid"]["detail"]}
     for b in baseline:  # condition "off" reproduces the plain retrieval baseline exactly
         assert off[b["id"]]["ranked"] == b["ranked"] and off[b["id"]]["recall@5"] == b["recall@5"]
     n = len(questions)
-    assert report["conditions"]["off"]["summary"]["cost"]["llm_calls"] == 0
-    assert report["conditions"]["multi"]["summary"]["cost"]["llm_calls"] == n
-    assert report["conditions"]["selective"]["summary"]["cost"]["llm_calls"] == n
+    assert report["conditions"]["off/hybrid"]["summary"]["cost"]["llm_calls"] == 0
+    assert report["conditions"]["multi/hybrid"]["summary"]["cost"]["llm_calls"] == n
+    assert report["conditions"]["selective/hybrid"]["summary"]["cost"]["llm_calls"] == n
     assert all(
         r["queries"][0] == q["question"]
-        for r, q in zip(report["conditions"]["multi"]["detail"], questions, strict=True)
+        for r, q in zip(report["conditions"]["multi/hybrid"]["detail"], questions, strict=True)
     )
+
+
+def test_decoys_are_deterministic_and_counted_offline():
+    import asyncio
+
+    import rewrite_eval
+    from run_eval import load_questions
+
+    questions = load_questions(limit=8)
+    decoys = rewrite_eval.make_decoys(questions)
+    assert decoys == rewrite_eval.make_decoys(questions)  # no randomness, no LLM
+    assert {rewrite_eval.decoy_kind(d["id"]) for d in decoys} == set(rewrite_eval.DECOY_KINDS)
+    report = asyncio.run(rewrite_eval.run_rewrite_comparison(questions, ["off"], list(rewrite_eval.RETRIEVERS), True))
+    assert report["decoys"] == len(decoys)
+    assert set(report["conditions"]) == {f"off/{k}" for k in rewrite_eval.RETRIEVERS}
+    for data in report["conditions"].values():
+        s = data["summary"]
+        assert 0.0 <= s["overall"]["decoy_win"] <= 1.0 and set(s["decoys"]) == set(rewrite_eval.DECOY_KINDS)
+        assert s["cost"]["llm_calls"] == 0
