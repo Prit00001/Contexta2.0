@@ -102,12 +102,13 @@ def test_decoys_are_deterministic_and_counted_offline():
     from run_eval import load_questions
 
     questions = load_questions(limit=8)
+    OFFLINE = [k for k in rewrite_eval.RETRIEVERS if k != "hybrid_rerank"]  # hybrid_rerank downloads a model
     decoys = rewrite_eval.make_decoys(questions)
     assert decoys == rewrite_eval.make_decoys(questions)  # no randomness, no LLM
     assert {rewrite_eval.decoy_kind(d["id"]) for d in decoys} == set(rewrite_eval.DECOY_KINDS)
-    report = asyncio.run(rewrite_eval.run_rewrite_comparison(questions, ["off"], list(rewrite_eval.RETRIEVERS), True))
+    report = asyncio.run(rewrite_eval.run_rewrite_comparison(questions, ["off"], OFFLINE, True))
     assert report["decoys"] == len(decoys)
-    assert set(report["conditions"]) == {f"off/{k}" for k in rewrite_eval.RETRIEVERS}
+    assert set(report["conditions"]) == {f"off/{k}" for k in OFFLINE}
     for data in report["conditions"].values():
         s = data["summary"]
         assert 0.0 <= s["overall"]["decoy_win"] <= 1.0 and set(s["decoys"]) == set(rewrite_eval.DECOY_KINDS)

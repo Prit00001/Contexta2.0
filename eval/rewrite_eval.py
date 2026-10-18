@@ -24,7 +24,7 @@ Per condition, retriever and question type: Recall@1/@5, MRR, nDCG@10, plus
 
 Retrievers (``--retrievers``, default ``hybrid``): ``hybrid`` (what /ask uses: 0.8 cosine + 0.2
 keyword overlap), ``hybrid_bm25`` (plus RRF-fused BM25, ADR-003), ``dense`` (cosine only),
-``keyword`` (BM25 only).
+``keyword`` (BM25 only), ``hybrid_rerank`` (hybrid + cross-encoder reranking, P2-07; downloads the model).
 """
 
 from __future__ import annotations
@@ -42,13 +42,14 @@ from core.embeddings import Embedder
 from core.generator import Generator
 from core.lc_retriever import ResearchRetriever
 from core.query_rewrite import MODES, fuse, prompt_mode, retrieval_queries, rewrite_question
+from core.reranker import Reranker
 from core.retriever import Retriever
 from core.sources import normalize_source
 from core.text import keywords
 from data.documents import DOCUMENTS
 
 DEPTH = 10
-RETRIEVERS = ("hybrid", "hybrid_bm25", "dense", "keyword")
+RETRIEVERS = ("hybrid", "hybrid_bm25", "dense", "keyword", "hybrid_rerank")
 DECOY_KINDS = ("literal", "repetition")
 
 
@@ -99,16 +100,32 @@ class _Rankers:
     def __init__(self, embedder, library, settings):
         self.embedder, self.library = embedder, library
 
-        def research(bm25: bool) -> ResearchRetriever:
+        def research(bm25: bool, reranker=None) -> ResearchRetriever:
             return ResearchRetriever(
                 embedder=embedder, library=library, arxiv=None, arxiv_enabled=False,
                 arxiv_budget_s=settings.arxiv_budget_s, min_score=0.0, hybrid_bm25_enabled=bm25,
+                reranker=reranker, rerank_candidates=settings.rerank_candidates,
             )  # fmt: skip
 
         self.hybrid, self.hybrid_bm25 = research(False), research(True)
+        self._research = research
+        self._hybrid_rerank = None
+
+    @property
+    def hybrid_rerank(self) -> ResearchRetriever:
+        """Built on first use: loads the cross-encoder (RERANK_MODEL or the small default)."""
+        if self._hybrid_rerank is None:
+            from run_eval import DEFAULT_RERANK_MODEL
+
+            settings = get_settings()
+            reranker = Reranker(settings.rerank_model or DEFAULT_RERANK_MODEL, settings.model_cache_dir)
+            if not reranker.available:
+                raise SystemExit(f"hybrid_rerank: could not load {reranker.model_name} ({reranker.error})")
+            self._hybrid_rerank = self._research(False, reranker)
+        return self._hybrid_rerank
 
     async def rank(self, kind: str, query: str) -> list[dict]:
-        if kind in ("hybrid", "hybrid_bm25"):
+        if kind in ("hybrid", "hybrid_bm25", "hybrid_rerank"):
             return (await getattr(self, kind).aretrieve(query, DEPTH, use_arxiv=False)).sources
         if kind == "dense":
             hits = self.library.search((await self.embedder.embed([query]))[0], DEPTH)
