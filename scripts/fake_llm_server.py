@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 _SOURCE = re.compile(r'<source id="(\d+)"[^>]*>\n(.*?)\n</source>', re.S)
@@ -80,11 +81,30 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             return self._send(400, {"error": {"message": "invalid JSON"}})
         text = fake_answer(req.get("messages", []))
+        if req.get("stream"):
+            return self._stream(text, req.get("model", "fake-llm"))
         return self._send(200, {
             "id": "chatcmpl-fake", "object": "chat.completion", "created": 0, "model": req.get("model", "fake-llm"),
             "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": text}}],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         })  # fmt: skip
+
+    def _stream(self, text: str, model: str) -> None:
+        """OpenAI-style SSE, one word per chunk with a short pause, so streaming is visible."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        base = {"id": "chatcmpl-fake", "object": "chat.completion.chunk", "created": 0, "model": model}
+        for i, word in enumerate(re.findall(r"\S+\s*", text)):
+            delta = {"role": "assistant", "content": word} if i == 0 else {"content": word}
+            chunk = {**base, "choices": [{"index": 0, "delta": delta, "finish_reason": None}]}
+            self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+            self.wfile.flush()
+            time.sleep(self.server.delay)
+        done = {**base, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+        self.wfile.write(f"data: {json.dumps(done)}\n\ndata: [DONE]\n\n".encode())
+        self.wfile.flush()
 
     def log_message(self, *args):  # keep test output quiet
         pass
@@ -94,8 +114,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=9009)
+    ap.add_argument("--delay", type=float, default=0.03, help="seconds between streamed words")
     args = ap.parse_args()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
+    server.delay = args.delay
     print(f"fake LLM listening on http://{args.host}:{args.port}/v1", flush=True)
     try:
         server.serve_forever()

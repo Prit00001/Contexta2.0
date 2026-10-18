@@ -331,9 +331,7 @@ def build_research_graph(
     return g.compile()
 
 
-async def run_research(
-    graph, retriever, question: str, top_k: int, options: dict | None = None, empty_message: str | None = None
-) -> ResearchState:
+def _initial_state(question: str, top_k: int, options: dict | None, empty_message: str | None) -> ResearchState:
     state: ResearchState = {
         "question": question,
         "top_k": top_k,
@@ -344,6 +342,56 @@ async def run_research(
     }
     if empty_message:
         state["empty_message"] = empty_message
-    return await graph.ainvoke(
-        state, config={"configurable": {"retriever": retriever}, "recursion_limit": RECURSION_LIMIT}
-    )
+    return state
+
+
+def _config(retriever) -> dict:
+    return {"configurable": {"retriever": retriever}, "recursion_limit": RECURSION_LIMIT}
+
+
+async def run_research(
+    graph, retriever, question: str, top_k: int, options: dict | None = None, empty_message: str | None = None
+) -> ResearchState:
+    return await graph.ainvoke(_initial_state(question, top_k, options, empty_message), config=_config(retriever))
+
+
+async def stream_research(
+    graph, retriever, question: str, top_k: int, options: dict | None = None, empty_message: str | None = None
+):
+    """Run the workflow, yielding events as it goes (``POST /ask/stream``):
+
+    * ``("stage", {"stage", "status", "duration_ms"})`` after every node;
+    * ``("sources", [source, ...])`` once retrieval has results;
+    * ``("token", text)`` - answer text from the ``generate`` node only (rewrite and claim-check
+      calls also stream internally, but are never shown);
+    * ``("reset", {"attempt"})`` - the streamed draft failed citation validation and is being
+      regenerated, so clients must discard the text shown so far;
+    * ``("final", state)`` - the complete final state, last.
+
+    Streamed tokens are the model's raw draft: hallucinated ``[n]`` markers are only removed in the
+    final state, which is what clients must keep.
+    """
+    final: dict = {}
+    generated = 0
+    async for mode, payload in graph.astream(
+        _initial_state(question, top_k, options, empty_message),
+        config=_config(retriever),
+        stream_mode=["messages", "updates", "values"],
+    ):
+        if mode == "messages":
+            chunk, meta = payload
+            text = chunk.content if isinstance(chunk.content, str) else ""
+            if meta.get("langgraph_node") == "generate" and text:
+                yield "token", text
+        elif mode == "updates":
+            for node, update in payload.items():
+                for step in (update or {}).get("trace", []):
+                    yield "stage", step
+                    generated += node == "generate"
+                    if node == "validate_answer" and step["status"] == "retry":
+                        yield "reset", {"attempt": generated + 1}
+                if node == "retrieve" and (update or {}).get("sources"):
+                    yield "sources", update["sources"]
+        else:
+            final = payload
+    yield "final", final

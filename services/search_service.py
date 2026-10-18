@@ -24,7 +24,7 @@ from core.lc_retriever import PdfChunkRetriever, ResearchRetriever, _unit
 from core.retriever import Retriever
 from core.text import clip
 from services.arxiv_client import ArxivClient
-from services.research_graph import build_research_graph, run_research
+from services.research_graph import build_research_graph, run_research, stream_research
 
 log = logging.getLogger("contexta.search")
 
@@ -96,6 +96,10 @@ class SearchService:
     # ---- graph -> response ---------------------------------------------------
     async def _run(self, retriever, question: str, top_k: int, options: dict, empty_message: str) -> tuple[dict, dict]:
         state = await run_research(self.graph, retriever, question, top_k, options, empty_message)
+        return self._response(state)
+
+    @staticmethod
+    def _response(state: dict) -> tuple[dict, dict]:
         if state.get("outcome") == "error":
             if state.get("error") == "retrieval_failed":
                 raise HTTPException(503, "Retrieval is temporarily unavailable. Please try again.")
@@ -127,10 +131,22 @@ class SearchService:
         return response, timings
 
     # ---- public API ----------------------------------------------------------
-    async def ask(self, question: str, top_k: int, use_arxiv: bool) -> dict:
+    @staticmethod
+    def _ask_timings(t: dict, t0: float) -> dict:
+        return {
+            "local": t["retrieval"].get("local", 0),
+            "arxiv": t["retrieval"].get("arxiv", 0),
+            "generate": t["generate_ms"],
+            "total": round((time.perf_counter() - t0) * 1000),
+        }
+
+    def _ask_key(self, question: str, top_k: int, use_arxiv: bool) -> tuple[str, bool, tuple]:
         question = " ".join(question.split())
         use_arxiv = use_arxiv and self.s.arxiv_enabled
-        key = ("ask", question.lower(), top_k, use_arxiv)
+        return question, use_arxiv, ("ask", question.lower(), top_k, use_arxiv)
+
+    async def ask(self, question: str, top_k: int, use_arxiv: bool) -> dict:
+        question, use_arxiv, key = self._ask_key(question, top_k, use_arxiv)
         if hit := await self._cached(key):
             return hit
 
@@ -138,14 +154,31 @@ class SearchService:
         response, t = await self._run(
             self.research_retriever, question, top_k, {"use_arxiv": use_arxiv}, NO_SOURCES_MSG
         )
-        response["timings_ms"] = {
-            "local": t["retrieval"].get("local", 0),
-            "arxiv": t["retrieval"].get("arxiv", 0),
-            "generate": t["generate_ms"],
-            "total": round((time.perf_counter() - t0) * 1000),
-        }
+        response["timings_ms"] = self._ask_timings(t, t0)
         await self._store(key, response)
         return response
+
+    async def ask_stream(self, question: str, top_k: int, use_arxiv: bool):
+        """Same answer as :meth:`ask`, as events: ``stage``, ``sources``, ``token``, ``reset``, then
+        ``done`` with the full response (identical shape to ``/ask``). A cache hit is a lone ``done``.
+        Errors raise ``HTTPException`` like :meth:`ask`; the route turns them into an ``error`` event."""
+        question, use_arxiv, key = self._ask_key(question, top_k, use_arxiv)
+        if hit := await self._cached(key):
+            yield "done", hit
+            return
+        t0 = time.perf_counter()
+        async for kind, payload in stream_research(
+            self.graph, self.research_retriever, question, top_k, {"use_arxiv": use_arxiv}, NO_SOURCES_MSG
+        ):
+            if kind == "sources":
+                yield kind, [_source_out(s, i) for i, s in enumerate(payload, 1)]
+            elif kind != "final":
+                yield kind, payload
+            else:
+                response, t = self._response(payload)
+                response["timings_ms"] = self._ask_timings(t, t0)
+                await self._store(key, response)
+                yield "done", response
 
     async def ask_pdf(self, question: str, chunks: list[dict], top_k: int, filename: str) -> dict:
         """Answer from an uploaded PDF. `chunks` are {"page": int, "text": str} from core.pdf.chunk."""

@@ -19,6 +19,8 @@ pre-LangChain implementation used (SRS SR-11).
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import httpx2
 import openai
@@ -59,14 +61,43 @@ class HttpxBridgeTransport(httpx2.AsyncBaseTransport):
             content=body,
             extensions={"timeout": httpx.Timeout(self.timeout).as_dict()},
         )
+        stream = _wants_stream(body)
         try:
-            resp = await self.client.send(req)
+            resp = await self.client.send(req, stream=stream)
         except httpx.TimeoutException as exc:
             raise httpx2.ReadTimeout(str(exc) or "timed out", request=request) from exc
         except httpx.HTTPError as exc:
             raise httpx2.ConnectError(type(exc).__name__, request=request) from exc
         headers = [(k, v) for k, v in resp.headers.multi_items() if k.lower() not in _DROP_RESPONSE_HEADERS]
+        if stream:  # token streaming (POST /ask/stream): pass chunks through as they arrive
+            return httpx2.Response(resp.status_code, headers=headers, stream=_BridgeStream(resp), request=request)
         return httpx2.Response(resp.status_code, headers=headers, content=resp.content, request=request)
+
+
+def _wants_stream(body: bytes) -> bool:
+    try:
+        return bool(json.loads(body or b"{}").get("stream"))
+    except (ValueError, AttributeError):
+        return False
+
+
+class _BridgeStream(httpx2.AsyncByteStream):
+    """Decoded body of a streaming ``httpx`` response, re-exposed to the ``httpx2``-based SDK."""
+
+    def __init__(self, resp: httpx.Response):
+        self.resp = resp
+
+    async def __aiter__(self):
+        try:
+            async for chunk in self.resp.aiter_bytes():
+                yield chunk
+        except httpx.TimeoutException as exc:
+            raise httpx2.ReadTimeout(str(exc) or "timed out") from exc
+        except httpx.HTTPError as exc:
+            raise httpx2.ReadError(type(exc).__name__) from exc
+
+    async def aclose(self) -> None:
+        await self.resp.aclose()
 
 
 def make_chat_model(spec: ProviderSpec, client: httpx.AsyncClient, timeout: float) -> ChatOpenAI:

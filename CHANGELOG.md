@@ -11,6 +11,9 @@ All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://
 - `eval/run_eval.py --rewrite all|<modes>` (`eval/rewrite_eval.py`): per-condition retrieval metrics, LLM calls, rewrite latency, abstention, similarity-to-gold delta.
 - `scripts/fake_llm_server.py` answers rewrite prompts deterministically, for offline demos.
 
+- Phase 3 harness: `--retrievers hybrid,hybrid_bm25,dense,keyword` and `--decoys` (keyword-stuffed decoy abstracts, brief §3.4); offline hash-embedding baseline in EVALUATION_REPORT §5c.
+- **`POST /ask/stream`** (P2-13): server-sent events (`stage`, `sources`, `token`, `reset`, `done`, `error`) over the same workflow, cache and rate limit as `/ask`; `done` is the `/ask` response. The UI streams library answers. The LLM HTTP bridge passes provider SSE through chunk by chunk; the fake LLM server streams with `--delay`.
+
 ### Changed
 - `Generator.judge` renamed `Generator.complete` (shared by claim checking and rewriting).
 
