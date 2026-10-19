@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, NavLink, Navigate, Outlet, useNavigate, useOutletContext, useParams } from "react-router-dom";
-import type { ConversationSummary, Workspace } from "../../api/types";
+import type { Billing, ConversationSummary, Workspace } from "../../api/types";
 import { useAuth } from "../../auth";
+import { TrialBanner, useBilling } from "./billing";
 import { SignIn } from "./SignIn";
 
 export const ROLE_RANK = { viewer: 0, member: 1, admin: 2 } as const;
@@ -12,6 +13,8 @@ export interface WorkspaceCtx {
   conversations: ConversationSummary[] | null;
   reloadConversations(): Promise<void>;
   retentionDays: number;
+  billing: Billing | null;
+  refreshBilling(): Promise<void>;
 }
 
 export const useWorkspace = () => useOutletContext<WorkspaceCtx>();
@@ -66,6 +69,7 @@ export function WorkspaceLayout() {
   const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
   const ws = list?.find((w) => w.workspace_id === wsId);
+  const { billing, refresh: refreshBilling } = useBilling(ws?.workspace_id);
 
   const reloadConversations = useCallback(async () => {
     if (!wsId) return;
@@ -98,6 +102,8 @@ export function WorkspaceLayout() {
     conversations,
     reloadConversations,
     retentionDays: config.history_retention_days,
+    billing,
+    refreshBilling,
   };
 
   return (
@@ -137,6 +143,11 @@ export function WorkspaceLayout() {
               <NavLink to="keys" className={tab}>
                 API keys
               </NavLink>
+              {billing?.enabled && (
+                <NavLink to="billing" className={tab}>
+                  Billing
+                </NavLink>
+              )}
             </>
           )}
         </nav>
@@ -146,6 +157,7 @@ export function WorkspaceLayout() {
         </p>
       </aside>
       <main>
+        <TrialBanner billing={billing} wsId={ws.workspace_id} />
         <Outlet context={ctx} />
       </main>
       {creating && (

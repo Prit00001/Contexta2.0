@@ -87,6 +87,13 @@ Traced (`TRACING_ENABLED=true`): FastAPI's own server span (method, route, `url.
 | `MAX_UPLOAD_MB` | `20` | Workspace uploads |
 | `REDIS_URL` | – | Shared answer cache, `/ask` and workspace rate limits across instances; falls back to in-memory if unset or unreachable |
 | `WORKSPACE_RATE_LIMIT_PER_MIN` | `60` | |
+| `BILLING_ENABLED` | `false` | Workspace billing ([ADR-007](../decisions/ADR-007-billing.md)): a free trial of active use per workspace, then a per-seat Razorpay subscription; asking and uploading return 402 after the trial. Off = unlimited. Needs migration `0004_billing.sql` |
+| `BILLING_TRIAL_MINUTES` | `60` | Minutes of active use free per workspace (idle time never counts) |
+| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` | – | Razorpay API keys (Dashboard → Account & Settings → API Keys). Required when billing is on; the secret is never logged |
+| `RAZORPAY_PLAN_ID` | – | The monthly per-seat plan (Dashboard → Subscriptions → Plans); its amount is the price per seat |
+| `RAZORPAY_WEBHOOK_SECRET` | – | Secret of the webhook pointed at `https://<your-app>/billing/razorpay/webhook` with the subscription events enabled |
+| `BILLING_PRICE_LABEL` | – | Shown on the Billing page, e.g. `₹499 per seat / month` (display only; the plan decides the charge) |
+| `BILLING_TOTAL_COUNT` | `120` | Monthly charges before a subscription ends (Razorpay requires a count) |
 | `HISTORY_RETENTION_DAYS` | `30` | Stored workspace conversations ([ADR-006](../decisions/ADR-006-conversation-history.md)) are hidden once idle this long and deleted by the worker (`python -m services.worker`, hourly). Only their author can see them; each turn keeps the full source passages, which therefore outlive a deleted document until the thread expires. Apply migration `0003_conversations.sql` (`python scripts/migrate.py`) before upgrading |
 
 ## Safe local setup

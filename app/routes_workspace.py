@@ -14,6 +14,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
 from app.deps import AuthContext, require_role
+from app.routes_billing import charge_activity
 from app.schemas import (
     ConversationDetail,
     ConversationOut,
@@ -88,6 +89,7 @@ async def upload_document(
     ctx: AuthContext = Depends(require_role("member")),
 ):
     await _check_rate_limit(request, workspace_id, ctx)
+    await charge_activity(request, workspace_id)
     settings = request.app.state.settings
     pool = request.app.state.db_pool
     max_bytes = int(settings.max_upload_mb * 1024 * 1024)
@@ -209,6 +211,7 @@ async def ask(
     workspace_id: str, body: WorkspaceAskRequest, request: Request, ctx: AuthContext = Depends(require_role("viewer"))
 ):
     await _check_rate_limit(request, workspace_id, ctx)
+    await charge_activity(request, workspace_id)
     pool = request.app.state.db_pool
     st = request.app.state
     retention = st.settings.history_retention_days

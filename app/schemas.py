@@ -339,6 +339,33 @@ class AuthConfig(BaseModel):
     history_retention_days: int
 
 
+class BillingOut(BaseModel):
+    """A workspace's plan (ADR-007). `plan`: trial | active | past_due | expired; `unlimited` when billing is off."""
+
+    enabled: bool
+    plan: Literal["unlimited", "trial", "active", "past_due", "expired"]
+    trial_seconds_left: int = 0
+    trial_seconds_total: int = 0
+    seats: int = Field(0, description="Members now, i.e. what the next renewal bills")
+    seats_billed: Optional[int] = None
+    subscription_status: Optional[str] = None
+    current_end: Optional[str] = None
+    price_label: str = ""
+    can_manage: bool = False
+
+
+class SubscribeOut(BaseModel):
+    subscription_id: str
+    key_id: str = Field(..., description="Razorpay public key id for Checkout")
+    seats: int
+
+
+class VerifyPaymentRequest(BaseModel):
+    razorpay_payment_id: str = Field(..., max_length=100)
+    razorpay_subscription_id: str = Field(..., max_length=100)
+    razorpay_signature: str = Field(..., max_length=200)
+
+
 class MemberOut(BaseModel):
     user_id: str
     role: str

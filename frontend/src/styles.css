@@ -193,3 +193,13 @@ table.list select { width: auto; padding: 4px 8px }
   .skel { animation: none }
   .src, .box, .drop { transition: none }
 }
+
+/* ---------- billing (ADR-007) ---------- */
+.banner { max-width: 720px; width: 100%; margin: 0 auto 16px; border: 1px solid var(--line); background: var(--accent-soft); border-radius: 10px; padding: 8px 12px; font-size: 13px }
+.banner.warn { border-color: var(--warn) }
+.banner.stop { border-color: var(--err); background: var(--field) }
+.banner a { margin-left: 4px; font-weight: 600 }
+table.facts { margin: 8px 0 16px }
+table.facts th { width: 140px; text-transform: none; letter-spacing: 0; font-size: 13px; font-weight: 500; color: var(--muted); padding: 10px 8px; border-top: 1px solid var(--line) }
+table.facts tr:first-child th, table.facts tr:first-child td { border-top: 0 }
+.inner > .btn, .inner > .ghost { align-self: flex-start }

@@ -135,6 +135,17 @@ class Settings(BaseModel):
     # Stored workspace conversations (P2-14, ADR-006): deleted this many days after the last turn
     history_retention_days: int = Field(30, ge=1, le=3650)
 
+    # Billing (ADR-007): a free trial of active use per workspace, then a per-seat Razorpay subscription.
+    # Off by default: without it nothing is ever paywalled (self-hosting, development).
+    billing_enabled: bool = False
+    billing_trial_minutes: int = Field(60, ge=0, le=100000)
+    billing_total_count: int = Field(120, ge=1, le=1200)  # monthly charges before the subscription ends
+    billing_price_label: str = ""  # shown in the UI, e.g. "₹499 per seat / month"; the price itself is the plan's
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = Field("", repr=False)
+    razorpay_webhook_secret: str = Field("", repr=False)
+    razorpay_plan_id: str = ""
+
     def min_score_for(self, backend: str) -> float:
         """MIN_SCORE if set explicitly, else the calibrated default for the backend actually in use
         (which is "hash" when fastembed was requested but failed to load)."""
@@ -151,6 +162,13 @@ class Settings(BaseModel):
             raise ValueError(f"unknown provider(s) {unknown}; expected any of {list(KNOWN_PROVIDERS)}")
         if self.storage_backend == "supabase" and not (self.supabase_url and self.supabase_service_key):
             raise ValueError("STORAGE_BACKEND=supabase requires SUPABASE_URL and SUPABASE_SERVICE_KEY")
+        if self.billing_enabled and not all(
+            (self.razorpay_key_id, self.razorpay_key_secret, self.razorpay_webhook_secret, self.razorpay_plan_id)
+        ):
+            raise ValueError(
+                "BILLING_ENABLED=true requires RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, "
+                "RAZORPAY_WEBHOOK_SECRET and RAZORPAY_PLAN_ID"
+            )
         if self.require_llm and not self.providers:
             raise ValueError(
                 "REQUIRE_LLM=true but no LLM provider is configured "

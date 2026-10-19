@@ -8,6 +8,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.deps import require_role, require_user
+from app.routes_billing import sync_seats
 from app.schemas import (
     AddMemberRequest,
     ApiKeyCreateRequest,
@@ -101,6 +102,7 @@ async def add_member(workspace_id: str, body: AddMemberRequest, request: Request
             db.put_pool_conn(pool, conn)
 
     await asyncio.to_thread(_add)
+    await sync_seats(request, workspace_id)
 
 
 @router.get("/workspaces/{workspace_id}/members", response_model=list[MemberOut])
@@ -130,6 +132,7 @@ async def remove_member(workspace_id: str, user_id: str, request: Request, ctx=D
             db.put_pool_conn(pool, conn)
 
     await asyncio.to_thread(_remove)
+    await sync_seats(request, workspace_id)
 
 
 @router.post("/workspaces/{workspace_id}/api-keys", response_model=ApiKeyCreateResponse)

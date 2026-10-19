@@ -2,6 +2,14 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Workspace billing (2026-10-19)
+
+### Added
+- Billing for workspaces ([ADR-007](docs/decisions/ADR-007-billing.md)), off unless `BILLING_ENABLED=true`: one hour of active use free per workspace (idle time never counts), then a per-seat monthly Razorpay subscription. After the trial, asking and uploading return 402; everything stays readable; paper search stays free.
+- `GET /workspaces/{id}/billing`, `POST /workspaces/{id}/activity` (trial heartbeat), `POST .../billing/subscribe`, `.../billing/verify` (Checkout signature), `.../billing/cancel`, and the signed Razorpay webhook `POST /billing/razorpay/webhook`. Member changes update the seat count from the next renewal.
+- Frontend: a trial banner with minutes left, a Billing page with Razorpay Checkout, and paywall messages on ask and upload.
+- Migration `0004_billing.sql`.
+
 ## [Unreleased] — React frontend (P2-12) (2026-10-19)
 
 ### Added

@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.observability import RequestContextMiddleware, configure_logging
 from app.routes import router
 from app.routes_admin import router as admin_router
+from app.routes_billing import router as billing_router
 from app.routes_workspace import router as workspace_router
 from core import db, tracing
 from core.cache import make_answer_cache
@@ -49,6 +50,7 @@ async def lifespan(app: FastAPI):
     generator = Generator(s.providers, client, s.llm_timeout)
     arxiv = ArxivClient(client, s.arxiv_max_results, s.arxiv_cache_ttl)
     app.state.settings = s
+    app.state.http = client  # shared outbound client (Razorpay, ...); tests swap its transport
     app.state.embedder, app.state.retriever, app.state.generator = embedder, retriever, generator
     redis = make_redis(s.redis_url)  # shared answer cache + rate limits across instances (P2-FR-07)
     app.state.redis = redis
@@ -118,6 +120,7 @@ def create_app(http_transport: httpx.AsyncBaseTransport | None = None) -> FastAP
     app.include_router(router)
     app.include_router(admin_router)
     app.include_router(workspace_router)
+    app.include_router(billing_router)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     if (FRONTEND_DIST / "index.html").exists():
