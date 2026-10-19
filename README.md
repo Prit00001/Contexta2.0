@@ -1,73 +1,277 @@
-# Contexta
+# Contexta 2.0
 
-Ask a question about ML/NLP → get a cited answer grounded in a local paper library **plus live arXiv search**.
+Ask an ML/NLP research question → get an answer grounded **only** in retrieved evidence — a curated paper library, live arXiv results, or a PDF you upload — with every `[n]` citation checked against the sources actually retrieved.
 
-FastAPI · FAISS · fastembed (all-MiniLM-L6-v2) · arXiv API · Groq / Gemini / OpenRouter (free tiers)
+FastAPI · LangGraph · LangChain · FAISS · fastembed (all-MiniLM-L6-v2, ONNX) · arXiv API · Groq / Gemini / OpenRouter / any OpenAI-compatible server
 
-## What changed in v2 (why the deployed demo now stays up)
+> Contexta 2.0 is a separate project evolved from [Prit00001/Contexta](https://github.com/Prit00001/Contexta) (history preserved). Phase 1 status, evidence and known limitations: [docs/PHASE_1_COMPLETION_REPORT.md](docs/PHASE_1_COMPLETION_REPORT.md). Phase 2 is in progress — status per item: [PHASE_2_BACKLOG](docs/roadmap/PHASE_2_BACKLOG.md).
 
-| Problem before | Fix |
+## What works (verified in Phase 1)
+
+| Feature | Notes |
 |---|---|
-| One free LLM → rate limits kill the app | **Provider chain** (Groq → Gemini → OpenRouter → custom). A failing provider gets a cooldown and the next one is tried |
-| All providers down = broken app | **Extractive fallback**: answer assembled from the top passages with citations. The app never errors because of the LLM |
-| torch + sentence-transformers ≈ 1 GB RAM | **fastembed (ONNX)**, same model, ~150 MB. Fits Render's 512 MB free tier |
-| Re-embedded everything on each start | Embeddings **cached on disk** by content hash |
-| Repeated questions burn API quota | Answer **cache** (1h) + arXiv cache + per-IP **rate limit** |
-| arXiv could hang a request | 9s time budget, polite 3s spacing, falls back to local-only with a notice |
-| Cold start downloads the model | Model **baked into the Docker image** |
+| `POST /ask` research Q&A | LangGraph workflow: validate → retrieve → generate → validate citations → respond |
+| Retrieval | FAISS over a 25-paper library + optional live arXiv, hybrid-scored, de-duplicated; sources carry `document_id` and `chunk_id` |
+| Grounded generation | Provider chain with per-provider cooldowns; prompt fences sources as untrusted data; one feedback-driven retry if the answer cites nothing |
+| Citation validation | Hallucinated `[n]` removed and reported; answer split into claims marked `cited` / `uncited` (marker-level check — see limitations) |
+| Never-down behaviour | No LLM key / all providers failing → extractive answer from top passages (`outcome: extractive_fallback`); nothing relevant → `insufficient_evidence` without calling an LLM |
+| `POST /ask-pdf` | Q&A over an uploaded PDF, page-level sources |
+| `GET /health`, `GET /ready` | Liveness; readiness with `ready` / `degraded` / `not_ready` and per-check reasons |
+| Observability | Request IDs (`X-Request-ID`), JSON logs per request and per workflow stage, no question text or keys in logs |
+| Workspace platform | Supabase-JWT/API-key auth, document upload, ingestion worker, pgvector hybrid Q&A (preserved from the baseline) |
+| Web UI | Single page at `/`; marks uncited sentences, claim-check results and removed markers; each `[n]` opens its excerpt |
+
+### Added in Phase 2 (so far)
+
+| Feature | Notes |
+|---|---|
+| Evaluation harness | 143-question set (unreviewed), retrieval metrics, `--with-llm` answer metrics, `--sweep-min-score` calibration — [EVALUATION_REPORT](docs/evaluation/EVALUATION_REPORT.md) |
+| `MIN_SCORE` per backend | Unset → `0.225` on MiniLM, `0.075` on hash embeddings, both calibrated by `make eval-sweep` (the old 0.2 left 26% of answerable questions with no sources on hash embeddings) |
+| Claim-support check | `CLAIM_CHECK=llm` (off by default): each cited claim marked `supported` / `not_supported` / `unknown` — verbatim quotes locally, the rest by one LLM-judge call |
+| Hybrid BM25 | `HYBRID_BM25_ENABLED=true` (off by default) — [ADR-003](docs/decisions/ADR-003-hybrid-retrieval.md) |
+| Shared state | With `REDIS_URL`, answer cache and `/ask` rate limit are shared across instances; in-memory fallback if Redis is down |
+| Metrics | `GET /metrics` (Prometheus): answers by outcome, latency, per-stage durations, LLM calls, 429s — no user content |
+| Workspace Q&A on the graph | `/workspaces/{id}/ask` returns the same `outcome` / `claims` / `citation_check` / `workflow` as `/ask` |
+| Fast offline start | Uncached model + no network: 46 s → ~5 s before falling back to hash embeddings |
+| Reranking | **On by default** (`RERANK_MODEL=Xenova/ms-marco-MiniLM-L-6-v2`, `none` to disable): a small cross-encoder reorders the top 20 sources — R@1 0.711 → 0.783, +0.4 s, 411 MB peak RAM |
+| Follow-up questions | Send `history` (last ≤3 turns) with `/ask` or `/ask/stream`; the follow-up is rewritten into a standalone question (`standalone_question`). Nothing is stored or logged server-side; the web page keeps turns in tab memory only |
+| Library + arXiv ranking | First measurement of the default path (library + live arXiv): arXiv was pushing out the library paper (R@1 0.711 → 0.603). A library prior and shorter rerank passages bring it to R@1 0.765 / R@5 0.944 with arXiv still ~half the sources, rerank ~0.5 s → [ADR-005](docs/decisions/ADR-005-library-prior.md) |
+| Streaming answers | `POST /ask/stream` (server-sent events): sources first, then answer tokens as the model writes, then the full validated `/ask` response; the web page uses it |
+
+### Phase 3 (experimental, off by default)
+
+| Feature | Notes |
+|---|---|
+| Query rewriting | `QUERY_REWRITE=single|multi|decompose|selective` — the research brief's conditions 1–5 as a `rewrite` node in the graph; one LLM call max, original query kept (except `single`), rewrites shown in `query_rewrites` and the UI. [ADR-004](docs/decisions/ADR-004-query-rewriting.md) |
+| Local rewriter | `REWRITE_PROVIDERS=custom` + `LLM_BASE_URL` → rewrite with a local Ollama model, answer with the hosted chain (condition 6). Measured: qwen2.5:7b on CPU ≈ hosted quality, 4–10 s per rewrite; use a GPU or a hosted model |
+| Comparison harness | `PYTHONPATH=. python eval/run_eval.py --rewrite all` — measured with gpt-oss-120b: `decompose` R@1 0.711 → 0.765, R@5 0.977 → 0.992 for one LLM call; `single` best on paraphrase (R@1 0.72 → 0.82). Default stays `off` (owner decision). EVALUATION_REPORT §5f |
+
+Verified for real on 2026-10-18/19: Groq LLM answers, the MiniLM and reranker downloads, and the Docker image (built and run with no network). Live arXiv is still only tested through mocks. See [Known limitations](#known-limitations).
+
+## Architecture
+
+```mermaid
+flowchart LR
+    C[UI / client] --> API[FastAPI routes]
+    API --> S[SearchService<br/>cache · response shaping]
+    S --> G[LangGraph workflow]
+    G --> R[ResearchRetriever<br/>LangChain BaseRetriever]
+    R --> F[(FAISS library)]
+    R --> X[(arXiv API)]
+    G --> GEN[Generator<br/>provider chain + cooldowns]
+    GEN --> L[ChatOpenAI per provider]
+    L --> P[(Groq · Gemini · OpenRouter · custom)]
+    G --> V[Citation validator]
+    G -. CLAIM_CHECK=llm .-> CC[Claim-support check]
+    S <-. REDIS_URL .-> RD[(Redis: cache · rate limit)]
+```
+
+LangChain is confined to four adapter modules (`core/llm.py`, `core/prompts.py`, `core/lc_retriever.py`, `core/sources.py`) and LangGraph to `services/research_graph.py`. Details: [SYSTEM_DESIGN](docs/architecture/SYSTEM_DESIGN.md) · [diagrams](docs/architecture/diagrams/) · [ADR-001](docs/decisions/ADR-001-project-architecture.md).
+
+## Prerequisites
+
+- Python **3.11 or 3.13** (both verified). `make` optional.
+- Internet access on first start (downloads the embedding model once, then cached), plus for arXiv and LLM calls.
+- Optional: one free LLM key — [Groq](https://console.groq.com/keys), [Gemini](https://aistudio.google.com/apikey) or [OpenRouter](https://openrouter.ai/keys). Without one, Contexta answers in extractive mode.
+- Optional: Docker (for Compose / the workspace platform's Postgres).
+
+## Installation
+
+```bash
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt                  # pinned; runtime-only: requirements.txt
+cp .env.example .env                                 # optional: add an LLM key
+```
 
 ## Run locally
 
 ```bash
-python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env        # add GROQ_API_KEY (free, no card: console.groq.com/keys)
 uvicorn app.main:app --reload
 ```
-Open http://localhost:8000. No key? It still works in source-based mode.
 
-## Deploy on Render (free)
+Open http://localhost:8000 (UI) or http://localhost:8000/docs (interactive API docs). Stop with Ctrl+C.
 
-1. Push this folder to GitHub.
-2. Render → **New → Blueprint** → pick the repo (it reads `render.yaml`).
-3. Add `GROQ_API_KEY` (and optionally `GEMINI_API_KEY`, `OPENROUTER_API_KEY`) in the dashboard.
-4. Deploy. Health check is `/health`.
+### Frontend (React + TypeScript, `frontend/`)
 
-Free web services sleep after ~15 min idle. A free uptime pinger (UptimeRobot, cron-job.org) hitting `/health` every 10 min keeps it warm.
-Hugging Face Spaces (Docker SDK) also works: add `app_port: 8000` to the Space README front matter.
+The UI is a React app: **Papers** (`/`, streaming cited answers, PDF upload, follow-ups) and **Workspace**
+(`/workspace`: sign-in, workspaces, documents, a thread view with saved conversations at
+`/workspace/{id}/ask/{conversation}`, and admin screens for members and API keys).
+
+```bash
+cd frontend && corepack enable && pnpm install
+pnpm dev        # http://localhost:5173, proxies API calls to uvicorn on :8000 (hot reload)
+pnpm build      # writes frontend/dist; uvicorn then serves it at / and /workspace
+pnpm test       # vitest; pnpm typecheck for tsc
+```
+
+FastAPI serves `frontend/dist` when it exists (the Docker image builds it in a Node stage). Without a
+build it falls back to the original no-build pages in `app/static/`, so a Python-only setup still has
+a UI. Workspace sign-in uses email + password when `SUPABASE_URL` and `SUPABASE_ANON_KEY` are set;
+otherwise it asks for a pasted access token. Workspaces need `DATABASE_URL`, `SUPABASE_JWT_SECRET` and
+the worker (`python -m services.worker`) for ingestion.
+
+The first start downloads the embedding model (cached afterwards). Check `GET /ready`: if `embeddings` is not `ok`, the model couldn't be loaded and retrieval is running on low-quality hash vectors.
+
+### Offline demo of the full LLM path (no API key)
+
+```bash
+python scripts/fake_llm_server.py --port 9009          # terminal 1: deterministic OpenAI-compatible stub
+LLM_PROVIDERS=custom LLM_BASE_URL=http://127.0.0.1:9009/v1 LLM_MODEL=fake-llm \
+  uvicorn app.main:app                                  # terminal 2
+```
+
+The stub quotes the retrieved sources with citations — it exercises the real pipeline but is not a model.
+
+### Checking every workflow node live
+
+```bash
+GROQ_API_KEY=... PYTHONPATH=. python scripts/live_node_check.py
+```
+
+Drives each LangGraph node (validate_request, contextualize, rewrite in every mode, retrieve, generate,
+validate_answer, check_claims, fallback, insufficient_evidence, finalize) and `/ask/stream` through the real
+API with a real LLM and live arXiv, and prints the trace each request took (~20 LLM calls). Routes a live
+model can't be steered into on demand are pinned offline by `tests/test_graph_routes.py`.
+
+### Using OpenRouter only (or a local Ollama)
+
+```bash
+LLM_PROVIDERS=openrouter OPENROUTER_API_KEY=sk-or-... uvicorn app.main:app
+LLM_PROVIDERS=custom LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=llama3.1:8b uvicorn app.main:app
+```
+
+## Docker
+
+```bash
+docker build -t contexta .
+docker run -p 8000:8000 --env-file .env contexta        # API only
+docker compose up --build                               # API + worker + Postgres/pgvector (+ migrations)
+```
+
+The image installs from the lockfile and bakes the embedding model and the reranker in at build time. Verified 2026-10-19: built from this Dockerfile and run with `--network none` — ready in ~4 s, both models load from the image, healthcheck `healthy`, ~395 MiB RAM. (GitHub Actions is not enabled on this repository yet, so CI has not run it.)
+
+## API usage
+
+```bash
+curl -s http://localhost:8000/ask -H 'content-type: application/json' \
+  -d '{"question": "How does retrieval-augmented generation reduce hallucination?", "top_k": 3, "use_arxiv": true}'
+```
+
+Response (abridged — full example in `/docs`):
+
+```json
+{
+  "answer": "RAG conditions the generator on retrieved passages ... [1]. Dense retrievers such as DPR supply them [2].",
+  "outcome": "answered",
+  "sources": [{"marker": 1, "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP",
+               "url": "https://arxiv.org/abs/2005.11401", "document_id": "doc_004", "chunk_id": "doc_004#0", "...": "..."}],
+  "citations": [{"marker": 1, "source_id": "doc_004", "chunk_id": "doc_004#0", "title": "...", "url": "..."}],
+  "claims": [{"text": "RAG conditions the generator on retrieved passages ...", "markers": [1], "status": "cited"}],
+  "citation_check": {"verification": "marker_only", "valid_markers": 2, "removed_markers": [], "uncited_claims": 0},
+  "workflow": [{"stage": "retrieve", "status": "ok", "duration_ms": 6}, "..."],
+  "provider": "groq", "model_used": "openai/gpt-oss-20b", "llm_used": true, "cached": false,
+  "warnings": [], "diagnostics": [], "request_id": "3f9c1a7e2b4d6f80", "timings_ms": {"total": 1190}
+}
+```
+
+| `outcome` | Meaning |
+|---|---|
+| `answered` | An LLM answered and cited at least one retrieved source |
+| `extractive_fallback` | No LLM configured/succeeded, or its answer cited nothing twice; answer is the best sentences from the top sources |
+| `insufficient_evidence` | Nothing relevant retrieved; no LLM call made |
+
+With `CLAIM_CHECK=llm`, each claim also carries `support` (`supported` / `not_supported` / `unknown`) and `support_method` (`quote` / `llm_judge`), and `citation_check.verification` is `claim_support` with `supported_claims` / `not_supported_claims` / `unknown_claims` counts. Otherwise those fields are `null`.
+
+Follow-ups: add `"history": [{"question": "What is QLoRA?", "answer": "..."}]` (oldest first, at most 3) and the response includes `standalone_question`, the rewritten question that was actually searched. The server keeps no conversation state.
+
+Streaming: `POST /ask/stream` takes the same body and sends events `stage`, `sources`, `token`, `reset` (the draft failed citation validation and is being regenerated — discard it), then `done` with exactly the `/ask` response, or `error` (`status`, `detail`). Keep `done.answer`: hallucinated markers are only removed there.
+
+```bash
+curl -N http://localhost:8000/ask/stream -H 'content-type: application/json' -d '{"question": "What is LoRA?"}'
+```
+
+Other endpoints: `POST /ask-pdf` (multipart `question`, `file`, `top_k`), `GET /health`, `GET /ready`, `GET /metrics` (Prometheus), and the workspace API under `/workspaces/...` (see `/docs`). Workspace users can keep conversations: `POST /workspaces/{id}/ask` with `"save": true` returns a `conversation_id` to continue with; `GET`/`DELETE /workspaces/{id}/conversations[/{cid}]` list, read and delete them. Threads are visible only to their author and deleted 30 days after the last turn ([ADR-006](docs/decisions/ADR-006-conversation-history.md)). Errors: 422 invalid input, 429 rate limited (`Retry-After`), 500 generic with `request_id`, 503 retrieval unavailable.
 
 ## Configuration
 
-| Variable | Default | Notes |
+All settings come from environment variables (or `.env`) and are validated at startup — an invalid value stops the server with a message naming the variable. Most-used:
+
+| Variable | Default | Purpose |
 |---|---|---|
-| `GROQ_API_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` | – | Set one or more |
-| `GROQ_MODEL` / `GEMINI_MODEL` / `OPENROUTER_MODEL` | `llama-3.1-8b-instant` / `gemini-2.5-flash` / `meta-llama/llama-3.3-70b-instruct:free` | Model IDs change; override here |
-| `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | – | Any OpenAI-compatible server (hosted Ollama, Cerebras…) |
-| `LLM_PROVIDERS` | `groq,gemini,openrouter,custom` | Order of the fallback chain |
-| `RATE_LIMIT_PER_MIN` | `20` | Per IP; `0` disables |
-| `ARXIV_ENABLED` | `true` | |
-| `ALLOWED_ORIGINS` | `*` | Comma-separated CORS origins |
+| `GROQ_API_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` | – | Provider keys; set any |
+| `LLM_PROVIDERS` | `groq,gemini,openrouter,custom` | Fallback order |
+| `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | – | Any OpenAI-compatible server (`custom`) |
+| `REQUIRE_LLM` | `false` | Refuse to start without a provider |
+| `LLM_MAX_ATTEMPTS` | `2` | Generation attempts per question (1–3) |
+| `QUERY_REWRITE` | `off` | Phase 3 experiment: `single` / `multi` / `decompose` / `selective` |
+| `CLAIM_CHECK` | `off` | `llm`: check cited claims against their sources (+1 LLM call per uncached answer) |
+| `MIN_SCORE` | per backend | Unset: `0.225` (MiniLM), `0.075` (hash embeddings, incl. fallback) — both calibrated |
+| `REDIS_URL` | – | Shared answer cache + rate limits across instances |
+| `ARXIV_ENABLED` | `true` | Live arXiv search |
+| `RATE_LIMIT_PER_MIN` | `20` | Per client IP on `/ask` |
+| `LOG_FORMAT` | `text` | `json` for production |
+| `METRICS_ENABLED` | `true` | `GET /metrics` |
 
-## API
-
-`POST /ask` `{ "question": "...", "top_k": 5, "use_arxiv": true }` → `answer`, `sources[]`, `provider`, `model_used`, `llm_used`, `cached`, `warnings[]`, `timings_ms`
-`GET /health` → index size, embedding backend, configured providers. Interactive docs at `/docs`.
-
-## Layout
-
-```
-app/        main.py (lifespan, static) · routes.py (/ask, /health, rate limiter) · config.py · schemas.py · static/index.html
-core/       embeddings.py · vector_store.py (FAISS) · retriever.py (disk-cached index) · generator.py (provider chain) · text.py
-services/   search_service.py (pipeline + re-rank) · arxiv_client.py
-data/       documents.py  ← add your own entries here
-tests/      pytest suite (no network, no model download needed)
-```
+Full reference: [docs/operations/CONFIGURATION.md](docs/operations/CONFIGURATION.md).
 
 ## Tests
 
 ```bash
-pip install -r requirements-dev.txt && pytest
+pytest -q                     # unit + integration + E2E; no network, no API keys (DB tests skip)
+make test-db                  # also run Postgres/pgvector tests (needs `docker compose up -d db`)
+make eval                     # retrieval metrics, offline;  make eval-sweep: MIN_SCORE calibration curve
+ruff check . && ruff format --check .
+cd frontend && pnpm typecheck && pnpm test   # React app (vitest + Testing Library)
+python scripts/smoke_test.py --base-url http://127.0.0.1:8000   # against a running server
 ```
 
+Current: **305 passed** (Python 3.13, with Postgres 16 + pgvector and a local `redis-server`; without them the DB and Redis tests skip) and **12** frontend tests (vitest). Phase 1 ended at 181. Details: [TEST_REPORT](docs/testing/TEST_REPORT.md) · [TEST_STRATEGY](docs/testing/TEST_STRATEGY.md).
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| Server exits with `ConfigError: Invalid configuration - X: ...` | Fix variable `X` in `.env` / environment |
+| `/ready` → `embeddings` not ok, answers poor | Embedding model couldn't download; check network, or set `FASTEMBED_CACHE_PATH` to a pre-populated cache |
+| Startup takes ~5 s offline, `/ready` says hash fallback | Model not cached and not downloadable; one download attempt is made, then hash embeddings are used. Pre-populate `FASTEMBED_CACHE_PATH` (the Docker image bakes the model in) |
+| `outcome: extractive_fallback` | No provider key, or all providers failing — see `diagnostics[]` (e.g. `groq: API key rejected`, `model ... not found (HTTP 404); check GROQ_MODEL`) |
+| `429 Too many requests` | Per-IP limit; raise `RATE_LIMIT_PER_MIN` or `0` to disable locally |
+| arXiv warning in `warnings[]` | arXiv slow/unavailable; library-only answer returned |
+| Workspace routes return 503 | `DATABASE_URL` or `SUPABASE_JWT_SECRET` not configured (or DB unreachable — see `/ready`) |
+
+## Known limitations
+
+- Citation validation is **marker-level** by default: it proves `[n]` points to a retrieved source, not that the source supports the claim (`verification: "marker_only"`). `CLAIM_CHECK=llm` adds an LLM-judge support check; its accuracy is unmeasured until `docs/evaluation/claims_to_label.csv` is human-labelled.
+- Measured with a real LLM (Groq gpt-oss, EVALUATION_REPORT §5e): citation precision 0.99 single-fact / 0.97 comparison but **0.72 on paraphrased questions**; abstention on out-of-library questions 0.94 after the fix (0.06 before).
+- Keyword-stuffed decoy abstracts outrank the right paper for ~9 in 10 questions with every retriever on MiniLM; reranking and query rewriting reduce that (EVALUATION_REPORT §5d.3, §5f).
+- `MIN_SCORE` is calibrated on the LLM-drafted, unreviewed eval set; recheck after the human review.
+- The evaluation questions were LLM-drafted and are not yet human-reviewed; treat every quality number as provisional.
+- The library is 25 curated abstracts; arXiv search is keyword-based and best-effort.
+- Live arXiv, providers and model downloads are verified for real; arXiv-path quality is measured against library-paper gold labels only (no arXiv-aware labels), so it favours finding the library paper.
+- Caches and the `/ask` rate limiter are per process unless `REDIS_URL` is set. The PDF-embedding cache is always per process.
+- `/ask` is intentionally unauthenticated (public demo), protected by rate limiting.
+
 ## Roadmap
-- PDF upload · cross-encoder re-ranking (needs a bigger instance) · streaming answers
+
+- **Decided 2026-10-19** — reranking on by default; query rewriting stays off (on top of reranking, `decompose` adds only +0.03 R@1 for an LLM call per question; opt in with `QUERY_REWRITE=decompose` or `selective`). Still the owner's: server-side conversation history for workspaces.
+- **Phase 2, still open** — human review of the eval set and labelling `docs/evaluation/claims_to_label.csv` (measures the claim checker); later: React frontend: [PHASE_2_BACKLOG](docs/roadmap/PHASE_2_BACKLOG.md)
+- **Phase 3 — done.** All six conditions measured ([ADR-004 Results](docs/decisions/ADR-004-query-rewriting.md)): rewriting stays off by default; local rewriting (Ollama qwen2.5:7b) is close in quality but ~10× slower on CPU (EVALUATION_REPORT §5h)
+
+## Project layout
+
+```
+app/        main.py (factory, lifespan) · routes.py · routes_workspace.py · routes_admin.py · deps.py
+            config.py (validated settings) · schemas.py · observability.py · static/ (no-build fallback UI)
+frontend/   React + TypeScript app (Vite, pnpm): src/pages (Search, workspace/*) · src/components · src/api
+core/       llm.py · prompts.py · lc_retriever.py · sources.py · citations.py   ← LangChain adapters
+            claim_support.py · query_rewrite.py · cache.py · metrics.py
+            generator.py · retriever.py · vector_store.py · embeddings.py · text.py · pdf.py
+            db.py · storage.py · parsers.py · chunking.py · auth.py · rate_limit.py
+services/   research_graph.py (LangGraph) · search_service.py · arxiv_client.py
+            workspace_qa.py · retrieval.py · ingestion.py · worker.py
+data/       documents.py (paper library)
+eval/       run_eval.py · rewrite_eval.py · dataset/ (questions.jsonl, review sheet)
+scripts/    smoke_test.py · fake_llm_server.py · live_node_check.py · fetch_arxiv_snapshot.py · migrate.py
+tests/      unit · integration/ · e2e/
+docs/       requirements · architecture · decisions · implementation · testing · operations · research · roadmap
+```

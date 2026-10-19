@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main, phase-1, phase-2]
+  pull_request:
+  workflow_dispatch:  # "Run workflow" button in the Actions tab
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install "$(grep -E '^ruff==' requirements-dev.txt)"
+      - run: ruff check .
+      - run: ruff format --check .
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: contexta
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/contexta
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Apply local auth shim and migrations
+        run: |
+          # redis-server: tests/integration/test_shared_state.py starts its own on a free port (P2-FR-07)
+          sudo apt-get install -y --no-install-recommends postgresql-client redis-server
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/local_shim.sql
+          python scripts/migrate.py
+      # No API keys: the default suite never calls paid providers (all outbound HTTP is mocked).
+      - run: pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: [lint, test, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (not pushed)
+        run: docker build -t contexta:ci .
+      - name: Start container and check /health and /ready
+        run: |
+          docker run -d --name contexta -p 8000:8000 -e ARXIV_ENABLED=false contexta:ci
+          for i in $(seq 1 60); do curl -fsS localhost:8000/health && break; sleep 2; done
+          curl -fsS localhost:8000/ready | tee ready.json
+          python3 -c "import json; r=json.load(open('ready.json')); assert r['checks']['embeddings']['ok'], r"
+          curl -fsS localhost:8000/workspace | grep -q 'id="root"'  # the React app is served
+          pip install "$(grep -E '^httpx==' requirements.txt)"
+          python3 scripts/smoke_test.py --base-url http://127.0.0.1:8000 || (docker logs contexta; exit 1)

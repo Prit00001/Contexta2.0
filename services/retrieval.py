@@ -1,6 +1,7 @@
 """Hybrid retrieval over a workspace's chunks: pgvector cosine + Postgres full-text
 search, merged and re-ranked in Python - same style as search_service.py's existing
 local+arXiv candidate merge, just over real ingested chunks instead."""
+
 from __future__ import annotations
 
 from typing import List, Optional
@@ -51,10 +52,10 @@ def hybrid_search(
     max_lex = max((r[-1] for r in lex_rows), default=0.0) or 1.0
     merged: dict = {}
     for row in vec_rows:
-        d = dict(zip(_COLS, row))
+        d = dict(zip(_COLS, row, strict=True))
         merged[d["id"]] = {**d, "vec_score": d["score"], "lex_score": 0.0}
     for row in lex_rows:
-        d = dict(zip(_COLS, row))
+        d = dict(zip(_COLS, row, strict=True))
         norm = d["score"] / max_lex
         if d["id"] in merged:
             merged[d["id"]]["lex_score"] = norm

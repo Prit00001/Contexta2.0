@@ -19,6 +19,7 @@
       --accent-ink: #ffffff;
       --accent-soft: #eef2ff;
       --err: #dc2626;
+      --warn: #b45309;
       --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
       color-scheme: light;
     }
@@ -35,6 +36,7 @@
         --accent-ink: #0c0c0e;
         --accent-soft: #1e1b3a;
         --err: #f87171;
+        --warn: #fbbf24;
         color-scheme: dark;
       }
     }
@@ -197,6 +199,23 @@
       padding: 8px 16px
     }
 
+    .newtopic {
+      margin-left: auto;
+      font-size: 13px;
+      color: var(--muted);
+      padding: 6px 10px;
+      border-radius: 8px
+    }
+
+    .newtopic:hover {
+      color: var(--ink);
+      background: var(--accent-soft)
+    }
+
+    .newtopic:not([hidden])+.go {
+      margin-left: 0
+    }
+
     .go:disabled {
       opacity: .5;
       cursor: progress
@@ -284,6 +303,30 @@
     .cite:hover {
       background: var(--accent);
       color: var(--accent-ink)
+    }
+
+    /* evidence: sentences without a citation, or that a claim check found unsupported */
+    .claim.uncited {
+      text-decoration: underline dotted var(--faint);
+      text-underline-offset: 4px;
+      cursor: help
+    }
+
+    .claim.unsupported {
+      text-decoration: underline wavy var(--warn);
+      text-underline-offset: 4px;
+      text-decoration-thickness: 1px;
+      cursor: help
+    }
+
+    .evidence {
+      font-size: 13px;
+      color: var(--muted);
+      margin: 0 0 6px
+    }
+
+    .evidence .flag {
+      color: var(--warn)
     }
 
     .note {
@@ -449,6 +492,7 @@
               </svg>
             </button>
           </span>
+          <button type="button" class="newtopic" id="newtopic" hidden title="Forget the conversation so far">New topic</button>
           <button class="go" id="go" type="submit">Ask</button>
         </div>
       </div>
@@ -479,6 +523,9 @@
       'why LoRA is cheap': 'What makes LoRA cheaper than full fine-tuning?',
     };
     let pdf = null;
+    // Follow-ups: the last 3 turns live only in this tab's memory and are sent with the next question.
+    // The server uses them for that one request and stores nothing; reloading or "New topic" forgets them.
+    let history = [];
 
     /* ---------- PDF attach ---------- */
     const fmtSize = (b) => b < 1024 * 1024 ? Math.max(1, Math.round(b / 1024)) + ' KB' : (b / 1048576).toFixed(1) + ' MB';
@@ -520,10 +567,52 @@
     /* ---------- rendering ---------- */
     function showError(msg) { $('out').innerHTML = `<p class="err">${esc(msg)}</p>`; }
 
-    function renderAnswer(text) {
+    const citeBtn = (n, sources) => {
+      const s = sources[n - 1];
+      const label = s ? `Source ${n}: ${s.title}` : `Source ${n}`;
+      return `<button type="button" class="cite" data-n="${n}" title="${esc(label)}" aria-label="${esc(label)}">${n}</button>`;
+    };
+
+    function renderAnswer(text, sources) {
       return esc(text).split(/\n{2,}/).map((p) =>
-        '<p>' + p.replace(/\[(\d+)\]/g, '<button type="button" class="cite" data-n="$1" aria-label="Jump to source $1">$1</button>') + '</p>'
+        '<p>' + p.replace(/\[(\d+)\]/g, (_, n) => citeBtn(+n, sources)) + '</p>'
       ).join('');
+    }
+
+    // Sentence-by-sentence from claims[]: flags uncited sentences and ones a claim check found unsupported.
+    function renderClaims(d) {
+      const html = d.claims.map((c) => {
+        const cites = c.markers.map((n) => citeBtn(n, d.sources)).join('');
+        let cls = '', why = '';
+        if (c.status === 'uncited') {
+          cls = ' uncited'; why = 'No citation: this sentence is not tied to a retrieved source.';
+        } else if (c.support === 'not_supported') {
+          cls = ' unsupported'; why = 'An AI check found the cited source does not back this sentence.';
+        }
+        const attrs = why ? ` title="${esc(why)}"` : '';
+        return `<span class="claim${cls}"${attrs}>${esc(c.text)}</span>${cites ? ' ' + cites : ''}`;
+      }).join(' ');
+      return `<p>${html}</p>`;
+    }
+
+    function evidenceSummary(d) {  // returns HTML; every dynamic value is a number or escaped
+      const cc = d.citation_check || {};
+      const n = d.claims.length;
+      if (!n || d.outcome === 'insufficient_evidence') return '';
+      const cited = n - (cc.uncited_claims || 0);
+      const parts = [cited === n ? 'Every sentence cites a source' : `${cited} of ${n} sentences cite a source`];
+      if (cc.verification === 'claim_support') {
+        const bits = [`${+cc.supported_claims || 0} supported`];
+        if (cc.not_supported_claims) bits.push(`<span class="flag">${+cc.not_supported_claims} not supported</span>`);
+        if (cc.unknown_claims) bits.push(`${+cc.unknown_claims} unchecked`);
+        parts.push('AI claim check: ' + bits.join(', '));
+      }
+      const removed = (cc.removed_markers || []).map((m) => `[${+m}]`);
+      if (removed.length) {
+        const what = removed.length === 1 ? 'a citation to a source that was' : `${removed.length} citations to sources that were`;
+        parts.push(`<span class="flag">removed ${what} never retrieved (${removed.join(' ')})</span>`);
+      }
+      return `<p class="evidence">${parts.join(' · ')}</p>`;
     }
 
     function sourceMeta(s) {
@@ -549,14 +638,66 @@
       }).join('');
       $('out').innerHTML =
         `<p class="status">${esc(status)}</p>` +
-        `<div class="answer">${renderAnswer(d.answer)}</div>` +
+        `<div class="answer">${d.claims && d.claims.length ? renderClaims(d) : renderAnswer(d.answer, d.sources)}</div>` +
+        evidenceSummary(d) +
+        (d.standalone_question ? `<p class="evidence">Read as: “${esc(d.standalone_question)}”</p>` : '') +
+        ((d.query_rewrites || []).length ? `<p class="evidence">Also searched for: ${d.query_rewrites.map((q) => '“' + esc(q) + '”').join(', ')}</p>` : '') +
         (d.warnings || []).map((w) => `<p class="note">${esc(w)}</p>`).join('') +
         (sources ? `<h2>Sources</h2><ol class="srcs">${sources}</ol>` : '');
     }
 
+    /* ---------- streaming (/ask/stream) ---------- */
+    function renderDraft(sources, draft) {
+      // While the model writes: sources and raw draft text. The final `done` event replaces all of it.
+      const list = sources.map((s, i) => `<li class="src" id="src-${i + 1}"><span class="n">${i + 1}</span><div>
+        <span class="t">${esc(s.title)}</span><span class="meta">${esc(sourceMeta(s))}</span></div></li>`).join('');
+      $('out').innerHTML = `<p class="status">Writing…</p>` +
+        `<div class="answer"><p>${draft ? renderAnswer(draft, sources).slice(3, -4) : '<span class="skel" style="display:block;width:70%"></span>'}</p></div>` +
+        (list ? `<h2>Sources</h2><ol class="srcs">${list}</ol>` : '');
+    }
+
+    async function renderStream(r) {
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '', sources = [], draft = '', finished = false;
+      const handle = (event, data) => {
+        if (event === 'sources') { sources = data; renderDraft(sources, draft); }
+        else if (event === 'token') { draft += data; renderDraft(sources, draft); }
+        else if (event === 'reset') { draft = ''; renderDraft(sources, draft); }
+        else if (event === 'done') { finished = data; render(data); }
+        else if (event === 'error') { finished = true; throw new Error(data.detail || 'Something went wrong.'); }
+      };
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let cut;
+        while ((cut = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, cut); buf = buf.slice(cut + 2);
+          const event = (block.match(/^event: (.*)$/m) || [])[1];
+          const data = (block.match(/^data: (.*)$/m) || [])[1];
+          if (event && data !== undefined) handle(event, JSON.parse(data));
+        }
+      }
+      if (!finished) throw new Error('The answer was interrupted. Try again in a moment.');
+      return finished;
+    }
+
+    function remember(question, d) {
+      if (!d || d.outcome === 'insufficient_evidence') return;
+      history = [...history, { question, answer: d.answer.slice(0, 4000) }].slice(-3);
+      $('newtopic').hidden = false;
+      $('q').placeholder = 'Ask a follow-up…';
+    }
+    $('newtopic').onclick = () => {
+      history = []; $('newtopic').hidden = true;
+      $('q').placeholder = 'Ask about machine learning or NLP…'; $('q').focus();
+    };
+
     $('out').addEventListener('click', (e) => {
       const b = e.target.closest('.cite'); if (!b) return;
       const el = $('src-' + b.dataset.n); if (!el) return;
+      const excerpt = el.querySelector('details'); if (excerpt) excerpt.open = true;  // [n] opens the cited passage
       el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
       el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1200);
     });
@@ -586,13 +727,14 @@
           fd.append('question', question); fd.append('top_k', top_k); fd.append('file', pdf);
           r = await fetch('/ask-pdf', { method: 'POST', body: fd });
         } else {
-          r = await fetch('/ask', {
+          r = await fetch('/ask/stream', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question, top_k, use_arxiv: $('arxiv').checked })
+            body: JSON.stringify({ question, top_k, use_arxiv: $('arxiv').checked, history })
           });
         }
         if (!r.ok) throw new Error(await errorMessage(r));
-        render(await r.json());
+        if (pdf) render(await r.json());
+        else remember(question, await renderStream(r));
       } catch (err) {
         showError(err instanceof TypeError ? 'Could not reach the server. Check your connection and try again.' : err.message);
       } finally { $('go').disabled = false; $('go').textContent = 'Ask'; }
@@ -600,7 +742,8 @@
 
     fetch('/health').then((r) => r.json()).then((h) => {
       $('foot').textContent = `${h.index_size} library papers · ` +
-        (h.llm_providers.length ? h.llm_providers.join(' → ') : 'no AI model configured');
+        (h.llm_providers.length ? h.llm_providers.join(' → ') : 'no AI model configured') + ' · ';
+      $('foot').insertAdjacentHTML('beforeend', '<a href="/workspace" style="color:inherit">Your workspace</a>');
     }).catch(() => { });
   </script>
 </body>

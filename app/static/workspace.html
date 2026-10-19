@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Contexta Workspace</title>
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='14' cy='14' r='8' fill='none' stroke='%234f46e5' stroke-width='3'/><path d='M20 20l7 7' stroke='%234f46e5' stroke-width='3' stroke-linecap='round'/></svg>">
+  <style>
+    /* Same tokens as index.html */
+    :root {
+      --bg: #fafafa;
+      --field: #ffffff;
+      --ink: #18181b;
+      --muted: #71717a;
+      --faint: #a1a1aa;
+      --line: #e4e4e7;
+      --accent: #4f46e5;
+      --accent-ink: #ffffff;
+      --accent-soft: #eef2ff;
+      --err: #dc2626;
+      --warn: #b45309;
+      --ok: #15803d;
+      --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      color-scheme: light;
+    }
+
+    @media (prefers-color-scheme:dark) {
+      :root {
+        --bg: #0c0c0e;
+        --field: #141417;
+        --ink: #ececef;
+        --muted: #a1a1aa;
+        --faint: #63636b;
+        --line: #27272c;
+        --accent: #a5b4fc;
+        --accent-ink: #0c0c0e;
+        --accent-soft: #1e1b3a;
+        --err: #f87171;
+        --warn: #fbbf24;
+        --ok: #4ade80;
+        color-scheme: dark;
+      }
+    }
+
+    * { box-sizing: border-box }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.6 var(--font);
+      -webkit-font-smoothing: antialiased
+    }
+
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px }
+    [hidden] { display: none !important }
+
+    button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer }
+    a { color: var(--accent) }
+
+    input[type=text], input[type=email], input[type=password], textarea, select {
+      font: inherit;
+      color: inherit;
+      background: var(--field);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 9px 12px;
+      width: 100%
+    }
+
+    input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent) }
+    textarea { resize: vertical }
+
+    .btn {
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 600;
+      font-size: 14px;
+      border-radius: 9px;
+      padding: 8px 16px
+    }
+
+    .btn:disabled { opacity: .5; cursor: progress }
+
+    .ghost { font-size: 13px; color: var(--muted); padding: 6px 10px; border-radius: 8px }
+    .ghost:hover { color: var(--ink); background: var(--accent-soft) }
+    .danger:hover { color: var(--err) }
+
+    .muted { color: var(--muted) }
+    .small { font-size: 13px }
+    .err { color: var(--err); font-size: 14px; margin: 8px 0 0 }
+
+    /* ---------- top bar ---------- */
+    .top {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line)
+    }
+
+    .top h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: -.01em; white-space: nowrap }
+    .top a { white-space: nowrap }
+    .top .who { margin-left: auto; font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center }
+
+    /* ---------- sign in ---------- */
+    .center { max-width: 400px; margin: clamp(40px, 12vh, 112px) auto; padding: 0 16px }
+    .center h2 { font-size: 22px; font-weight: 600; letter-spacing: -.015em; margin: 0 0 4px }
+    .stack { display: grid; gap: 10px; margin-top: 20px }
+
+    /* ---------- app layout ---------- */
+    .app { display: grid; grid-template-columns: 260px 1fr; min-height: calc(100vh - 57px) }
+    aside { border-right: 1px solid var(--line); padding: 16px; display: flex; flex-direction: column; gap: 16px; min-width: 0 }
+    main { padding: 24px clamp(16px, 4vw, 48px) 48px; min-width: 0 }
+    .inner { max-width: 720px; margin: 0 auto }
+
+    .label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--faint);
+      margin: 0 0 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between
+    }
+
+    .tabs { display: flex; gap: 4px }
+    .tab { font-size: 14px; padding: 6px 12px; border-radius: 8px; color: var(--muted) }
+    .tab[aria-selected=true] { background: var(--accent-soft); color: var(--ink); font-weight: 500 }
+
+    .convs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; overflow-y: auto }
+    .conv { display: block; width: 100%; text-align: left; padding: 7px 10px; border-radius: 8px }
+    .conv:hover { background: var(--accent-soft) }
+    .conv[aria-current=true] { background: var(--accent-soft); font-weight: 500 }
+    .conv .t { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px }
+    .conv .d { display: block; font-size: 12px; color: var(--faint) }
+    .privacy { font-size: 12px; color: var(--faint); margin-top: auto }
+
+    /* ---------- thread ---------- */
+    .thread-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px }
+    .thread-head h2 { font-size: 18px; font-weight: 600; margin: 0; min-width: 0; overflow-wrap: anywhere }
+    .thread-head .ghost { margin-left: auto; flex: none }
+
+    .turn { margin-bottom: 36px }
+    .q { font-weight: 600; margin: 0 0 4px; overflow-wrap: anywhere }
+    .read-as { font-size: 13px; color: var(--muted); margin: 0 0 8px }
+    .answer { font-size: 16px; line-height: 1.7; overflow-wrap: anywhere }
+    .answer p { margin: 0 0 .8em }
+    .status { font-size: 12px; color: var(--faint); margin: 0 0 4px }
+
+    .cite {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-soft);
+      border-radius: 4px;
+      padding: 0 5px;
+      margin: 0 1px;
+      vertical-align: .2em;
+      line-height: 1.5
+    }
+
+    .cite:hover { background: var(--accent); color: var(--accent-ink) }
+    .claim.uncited { text-decoration: underline dotted var(--faint); text-underline-offset: 4px; cursor: help }
+    .claim.unsupported { text-decoration: underline wavy var(--warn); text-underline-offset: 4px; text-decoration-thickness: 1px; cursor: help }
+
+    details.srcbox { margin-top: 6px; font-size: 14px }
+    details.srcbox > summary { cursor: pointer; color: var(--faint); font-size: 13px; width: fit-content }
+    .srcs { list-style: none; margin: 8px 0 0; padding: 0 }
+    .src { display: grid; grid-template-columns: 22px 1fr; gap: 0 8px; padding: 10px 8px; margin: 0 -8px; border-radius: 10px; border-top: 1px solid var(--line); transition: background .3s }
+    .src:first-child { border-top: 0 }
+    .src.flash { background: var(--accent-soft) }
+    .src .n { font-size: 13px; color: var(--faint) }
+    .src .t { font-weight: 500 }
+    .src .meta { display: block; font-size: 13px; color: var(--muted) }
+    .src p { margin: 4px 0 0; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere }
+
+    .composer { position: sticky; bottom: 0; background: var(--bg); padding: 12px 0 4px; border-top: 1px solid var(--line) }
+    .composer .row { display: flex; align-items: center; gap: 12px; margin-top: 8px; flex-wrap: wrap }
+    .composer label { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; cursor: pointer }
+    .composer input[type=checkbox] { accent-color: var(--accent); margin: 0 }
+    .composer .btn { margin-left: auto }
+
+    .empty { color: var(--muted); padding: 40px 0; text-align: center }
+
+    .skel { height: 12px; border-radius: 6px; background: var(--line); margin: 0 0 12px; animation: pulse 1.2s ease-in-out infinite }
+    @keyframes pulse { 50% { opacity: .4 } }
+
+    /* ---------- documents ---------- */
+    .drop {
+      border: 1px dashed var(--line);
+      border-radius: 14px;
+      padding: 28px 16px;
+      text-align: center;
+      color: var(--muted);
+      background: var(--field);
+      transition: border-color .15s, background .15s
+    }
+
+    .drop.drag { border-color: var(--accent); background: var(--accent-soft) }
+    .docs { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px }
+    .docs th { text-align: left; font-size: 12px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; padding: 0 8px 6px }
+    .docs td { border-top: 1px solid var(--line); padding: 10px 8px; vertical-align: middle }
+    .docs td:last-child { text-align: right }
+    .docs td:first-child { overflow-wrap: anywhere }
+    .pill { font-size: 12px; border-radius: 999px; padding: 1px 8px; background: var(--accent-soft); white-space: nowrap }
+    .pill.ready { color: var(--ok) }
+    .pill.failed { color: var(--err) }
+
+    .modal { position: fixed; inset: 0; background: rgb(0 0 0 / .4); display: grid; place-items: center; padding: 16px }
+    .modal form { background: var(--field); border: 1px solid var(--line); border-radius: 14px; padding: 20px; width: min(400px, 100%) }
+    .modal h3 { margin: 0 0 4px; font-size: 16px }
+    .modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px }
+
+    @media (max-width: 760px) {
+      .app { grid-template-columns: 1fr }
+      aside { border-right: 0; border-bottom: 1px solid var(--line) }
+      .convs { max-height: 180px }
+      .docs .when { display: none }
+      #who-text { display: none }
+    }
+
+    @media (prefers-reduced-motion:reduce) {
+      .skel { animation: none }
+      .src, .drop { transition: none }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="top">
+    <h1>Contexta <span class="muted" style="font-weight:400">Workspace</span></h1>
+    <a class="small" href="/">Paper search</a>
+    <span class="who" id="who" hidden><span id="who-text"></span><button class="ghost" id="signout">Sign out</button></span>
+  </div>
+
+  <!-- ---------- sign in ---------- -->
+  <section class="center" id="signin" hidden>
+    <h2>Sign in</h2>
+    <p class="muted" style="margin:0">Ask questions about your team's own documents.</p>
+    <form class="stack" id="pw-form" hidden>
+      <input type="email" id="email" placeholder="Email" autocomplete="username" required aria-label="Email">
+      <input type="password" id="password" placeholder="Password" autocomplete="current-password" required aria-label="Password">
+      <button class="btn" id="pw-go">Sign in</button>
+    </form>
+    <form class="stack" id="token-form" hidden>
+      <p class="small muted" style="margin:0">Email sign-in is not configured on this server (set
+        <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code>). Paste a Supabase access token instead:</p>
+      <textarea id="token" rows="4" placeholder="eyJhbGciOi…" aria-label="Access token" required></textarea>
+      <button class="btn">Continue</button>
+    </form>
+    <p class="err" id="signin-err" hidden></p>
+    <p class="muted small" id="no-db" hidden>Workspaces are not enabled on this server (no database configured).</p>
+  </section>
+
+  <!-- ---------- app ---------- -->
+  <div class="app" id="app" hidden>
+    <aside>
+      <div>
+        <p class="label"><span>Workspace</span><button class="ghost" id="new-ws" title="Create a workspace">+ New</button></p>
+        <select id="ws" aria-label="Workspace"></select>
+      </div>
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" id="tab-ask" aria-selected="true">Ask</button>
+        <button class="tab" role="tab" id="tab-docs" aria-selected="false">Documents</button>
+      </div>
+      <div style="display:flex;flex-direction:column;min-height:0;flex:1">
+        <p class="label"><span>Conversations</span><button class="ghost" id="new-conv">+ New</button></p>
+        <ul class="convs" id="convs"></ul>
+        <p class="small muted" id="convs-empty" hidden>No saved conversations yet.</p>
+      </div>
+      <p class="privacy" id="privacy"></p>
+    </aside>
+
+    <main>
+      <div class="inner" id="view-ask">
+        <div class="thread-head">
+          <h2 id="thread-title">New conversation</h2>
+          <button class="ghost danger" id="del-conv" hidden>Delete</button>
+        </div>
+        <p class="small muted" id="thread-expiry" hidden></p>
+        <div id="thread" aria-live="polite"></div>
+        <form class="composer" id="ask-form">
+          <textarea id="q" rows="2" maxlength="500" placeholder="Ask about your documents…" aria-label="Your question" required></textarea>
+          <div class="row">
+            <label id="save-opt"><input type="checkbox" id="save" checked> Save to my history</label>
+            <button class="btn" id="go">Ask</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="inner" id="view-docs" hidden>
+        <div class="thread-head"><h2>Documents</h2></div>
+        <div class="drop" id="drop">
+          <p style="margin:0">Drop PDF, DOCX, TXT or MD files here, or <button class="ghost" id="pick" style="padding:0;color:var(--accent)">choose files</button></p>
+          <input type="file" id="files" multiple accept=".pdf,.docx,.txt,.md" hidden>
+        </div>
+        <p class="small muted" id="viewer-note" hidden>You have view access: you can ask questions but not add or delete documents.</p>
+        <p class="err" id="docs-err" hidden></p>
+        <table class="docs">
+          <thead><tr><th>File</th><th>Status</th><th class="when">Added</th><th></th></tr></thead>
+          <tbody id="docs"></tbody>
+        </table>
+        <p class="empty" id="docs-empty" hidden>No documents yet.</p>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal" id="ws-modal" hidden>
+    <form id="ws-form">
+      <h3>New workspace</h3>
+      <div class="stack" style="margin-top:12px">
+        <input type="text" id="ws-org" placeholder="Organisation name" required maxlength="200" aria-label="Organisation name">
+        <input type="text" id="ws-name" placeholder="Workspace name" required maxlength="200" aria-label="Workspace name">
+      </div>
+      <p class="err" id="ws-err" hidden></p>
+      <div class="actions"><button type="button" class="ghost" id="ws-cancel">Cancel</button><button class="btn">Create</button></div>
+    </form>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const ROLE_RANK = { viewer: 0, member: 1, admin: 2 };
+
+    // Tokens live only in this tab (sessionStorage): closing the tab signs out.
+    const store = {
+      get() { try { return JSON.parse(sessionStorage.getItem('contexta.auth') || 'null'); } catch (_) { return null; } },
+      set(v) { try { v ? sessionStorage.setItem('contexta.auth', JSON.stringify(v)) : sessionStorage.removeItem('contexta.auth'); } catch (_) { } },
+    };
+    let cfg = null, auth = store.get(), workspaces = [], ws = null;
+    let conv = null;          // { id, title, expires_at } of the open stored conversation, or null
+    let looseHistory = [];    // unsaved follow-ups: last 3 turns, this tab only
+    let turnCount = 0, pollTimer = null;
+
+    /* ---------- auth ---------- */
+    function claimsOf(token) {
+      try { return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (_) { return {}; }
+    }
+
+    async function supabaseToken(grant, body) {
+      const r = await fetch(`${cfg.supabase_url}/auth/v1/token?grant_type=${grant}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', apikey: cfg.supabase_anon_key }, body: JSON.stringify(body),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error_description || d.msg || 'Sign-in failed.');
+      return { access_token: d.access_token, refresh_token: d.refresh_token, email: d.user?.email };
+    }
+
+    async function refresh() {
+      if (!auth?.refresh_token || !cfg?.supabase_anon_key) return false;
+      try { auth = { ...auth, ...(await supabaseToken('refresh_token', { refresh_token: auth.refresh_token })) }; store.set(auth); return true; }
+      catch (_) { return false; }
+    }
+
+    async function api(path, opts = {}, retried = false) {
+      const headers = { ...(opts.headers || {}), Authorization: `Bearer ${auth.access_token}` };
+      if (opts.json !== undefined) { headers['Content-Type'] = 'application/json'; opts = { ...opts, body: JSON.stringify(opts.json) }; }
+      const r = await fetch(path, { ...opts, headers });
+      if (r.status === 401 && !retried && await refresh()) return api(path, opts, true);
+      if (r.status === 401) { signOut('Your session expired. Sign in again.'); throw new Error('Signed out.'); }
+      if (!r.ok) throw new Error(await errorMessage(r));
+      return r.status === 204 ? null : r.json();
+    }
+
+    async function errorMessage(r) {
+      if (r.status === 429) return 'Too many requests. Wait a minute, then try again.';
+      try {
+        const b = await r.json();
+        if (typeof b.detail === 'string') return b.detail;
+        if (Array.isArray(b.detail)) return b.detail.map((e) => e.msg).join('; ');
+      } catch (_) { }
+      return `Something went wrong (${r.status}).`;
+    }
+
+    function signOut(msg) {
+      auth = null; store.set(null); clearInterval(pollTimer);
+      $('app').hidden = true; $('who').hidden = true;
+      showSignIn(msg);
+    }
+    $('signout').onclick = () => signOut();
+
+    function showSignIn(msg) {
+      $('signin').hidden = false;
+      $('no-db').hidden = cfg.workspaces_enabled;
+      $('pw-form').hidden = !cfg.workspaces_enabled || !cfg.supabase_anon_key;
+      $('token-form').hidden = !cfg.workspaces_enabled || !!cfg.supabase_anon_key;
+      $('signin-err').hidden = !msg; $('signin-err').textContent = msg || '';
+    }
+
+    $('pw-form').onsubmit = async (e) => {
+      e.preventDefault(); $('pw-go').disabled = true;
+      try { auth = await supabaseToken('password', { email: $('email').value, password: $('password').value }); store.set(auth); await start(); }
+      catch (err) { $('signin-err').hidden = false; $('signin-err').textContent = err.message; }
+      finally { $('pw-go').disabled = false; }
+    };
+    $('token-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const t = $('token').value.trim();
+      if (t.split('.').length !== 3) { $('signin-err').hidden = false; $('signin-err').textContent = 'That does not look like an access token.'; return; }
+      auth = { access_token: t, email: claimsOf(t).email }; store.set(auth); await start();
+    };
+
+    /* ---------- workspaces ---------- */
+    async function start() {
+      try { workspaces = await api('/workspaces'); }
+      catch (err) { if (auth) signOut(err.message); return; }
+      $('signin').hidden = true; $('app').hidden = false; $('who').hidden = false;
+      $('who-text').textContent = auth.email || claimsOf(auth.access_token).email || 'Signed in';
+      $('privacy').textContent = `Saved conversations are visible only to you and deleted ${cfg.history_retention_days} days after the last message.`;
+      renderWorkspaces();
+      if (!workspaces.length) openWsModal();
+    }
+
+    function renderWorkspaces(selectId) {
+      const keep = selectId || ws?.workspace_id || localPref('ws');
+      $('ws').innerHTML = workspaces.map((w) => `<option value="${esc(w.workspace_id)}">${esc(w.name)} (${esc(w.role)})</option>`).join('');
+      const pick = workspaces.find((w) => w.workspace_id === keep) || workspaces[0];
+      if (pick) { $('ws').value = pick.workspace_id; selectWorkspace(pick.workspace_id); }
+    }
+
+    function localPref(k, v) {  // remembered workspace: a per-browser convenience only
+      try { if (v === undefined) return localStorage.getItem('contexta.' + k); localStorage.setItem('contexta.' + k, v); } catch (_) { return null; }
+    }
+
+    function selectWorkspace(id) {
+      ws = workspaces.find((w) => w.workspace_id === id); localPref('ws', id);
+      const canEdit = ROLE_RANK[ws.role] >= ROLE_RANK.member;
+      $('drop').hidden = !canEdit; $('viewer-note').hidden = canEdit;
+      newConversation(); loadConversations();
+      if (!$('view-docs').hidden) loadDocs();
+    }
+    $('ws').onchange = (e) => selectWorkspace(e.target.value);
+
+    function openWsModal() { $('ws-modal').hidden = false; $('ws-err').hidden = true; $('ws-org').focus(); }
+    $('new-ws').onclick = openWsModal;
+    $('ws-cancel').onclick = () => { $('ws-modal').hidden = true; };
+    $('ws-form').onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        const r = await api('/workspaces', { method: 'POST', json: { org_name: $('ws-org').value.trim(), workspace_name: $('ws-name').value.trim() } });
+        workspaces = await api('/workspaces'); $('ws-modal').hidden = true; $('ws-form').reset();
+        renderWorkspaces(r.workspace_id);
+      } catch (err) { $('ws-err').hidden = false; $('ws-err').textContent = err.message; }
+    };
+
+    /* ---------- tabs ---------- */
+    function showTab(name) {
+      $('tab-ask').setAttribute('aria-selected', name === 'ask'); $('tab-docs').setAttribute('aria-selected', name === 'docs');
+      $('view-ask').hidden = name !== 'ask'; $('view-docs').hidden = name !== 'docs';
+      if (name === 'docs') loadDocs(); else clearInterval(pollTimer);
+    }
+    $('tab-ask').onclick = () => showTab('ask');
+    $('tab-docs').onclick = () => showTab('docs');
+
+    /* ---------- conversations ---------- */
+    const when = (iso) => {
+      const d = new Date(iso), days = Math.floor((Date.now() - d) / 86400000);
+      return days < 1 ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : days < 7 ? `${days}d ago` : d.toLocaleDateString();
+    };
+
+    async function loadConversations() {
+      const list = await api(`/workspaces/${ws.workspace_id}/conversations`).catch(() => []);
+      $('convs').innerHTML = list.map((c) => `<li><button class="conv" data-id="${esc(c.id)}" aria-current="${c.id === conv?.id}">
+        <span class="t">${esc(c.title)}</span><span class="d">${esc(when(c.updated_at))} · ${+c.turns} ${c.turns === 1 ? 'question' : 'questions'}</span></button></li>`).join('');
+      $('convs-empty').hidden = list.length > 0;
+    }
+
+    $('convs').onclick = (e) => { const b = e.target.closest('.conv'); if (b) openConversation(b.dataset.id); };
+    $('new-conv').onclick = () => { newConversation(); showTab('ask'); $('q').focus(); };
+
+    function newConversation() {
+      conv = null; looseHistory = []; turnCount = 0;
+      $('thread').innerHTML = `<p class="empty">Ask a question about the documents in this workspace.</p>`;
+      $('thread-title').textContent = 'New conversation';
+      $('del-conv').hidden = true; $('thread-expiry').hidden = true; $('save-opt').hidden = false;
+      $('q').placeholder = 'Ask about your documents…';
+      document.querySelectorAll('.conv').forEach((b) => b.setAttribute('aria-current', 'false'));
+    }
+
+    async function openConversation(id) {
+      showTab('ask');
+      $('thread').innerHTML = skeleton();
+      try {
+        const d = await api(`/workspaces/${ws.workspace_id}/conversations/${id}`);
+        conv = { id: d.id, title: d.title }; turnCount = 0; $('thread').innerHTML = '';
+        d.turns.forEach((t) => appendTurn(t.question, t));
+        setThreadHeader(d.title, d.expires_at);
+        document.querySelectorAll('.conv').forEach((b) => b.setAttribute('aria-current', b.dataset.id === id));
+      } catch (err) { $('thread').innerHTML = `<p class="err">${esc(err.message)}</p>`; loadConversations(); }
+    }
+
+    function setThreadHeader(title, expiresAt) {
+      $('thread-title').textContent = title; $('del-conv').hidden = false; $('save-opt').hidden = true;
+      $('q').placeholder = 'Ask a follow-up…';
+      $('thread-expiry').hidden = !expiresAt;
+      if (expiresAt) $('thread-expiry').textContent = `Deleted on ${new Date(expiresAt).toLocaleDateString()} unless you continue it.`;
+    }
+
+    $('del-conv').onclick = async () => {
+      if (!conv || !confirm('Delete this conversation? This cannot be undone.')) return;
+      try { await api(`/workspaces/${ws.workspace_id}/conversations/${conv.id}`, { method: 'DELETE' }); newConversation(); loadConversations(); }
+      catch (err) { alert(err.message); }
+    };
+
+    /* ---------- rendering a turn ---------- */
+    const skeleton = () => '<div class="skel" style="width:92%"></div><div class="skel" style="width:84%"></div><div class="skel" style="width:58%"></div>';
+
+    // Works for both a live /ask response (sources: snippet) and a stored turn (sources: full text).
+    function turnHtml(n, question, d) {
+      const sources = (d.sources || []).map((s) => ({ title: s.filename, page: s.page_number, section: s.section_heading, text: s.text ?? s.snippet }));
+      const cite = (m) => {
+        const s = sources[m - 1], label = s ? `Source ${m}: ${s.title}` : `Source ${m}`;
+        return `<button type="button" class="cite" data-turn="${n}" data-n="${+m}" title="${esc(label)}" aria-label="${esc(label)}">${+m}</button>`;
+      };
+      const body = d.claims && d.claims.length
+        ? '<p>' + d.claims.map((c) => {
+          let cls = '', why = '';
+          if (c.status === 'uncited') { cls = ' uncited'; why = 'No citation: not tied to a retrieved passage.'; }
+          else if (c.support === 'not_supported') { cls = ' unsupported'; why = 'An AI check found the cited passage does not back this sentence.'; }
+          const cites = c.markers.map(cite).join('');
+          return `<span class="claim${cls}"${why ? ` title="${esc(why)}"` : ''}>${esc(c.text)}</span>${cites ? ' ' + cites : ''}`;
+        }).join(' ') + '</p>'
+        : esc(d.answer).split(/\n{2,}/).map((p) => '<p>' + p.replace(/\[(\d+)\]/g, (_, m) => cite(+m)) + '</p>').join('');
+      const status = d.outcome === 'extractive_fallback' ? 'Quoted directly from documents (AI model unavailable)'
+        : d.outcome === 'insufficient_evidence' ? 'Not found in this workspace\'s documents' : '';
+      const list = sources.map((s, i) => `<li class="src" id="t${n}-src-${i + 1}"><span class="n">${i + 1}</span><div>
+          <span class="t">${esc(s.title)}</span>
+          <span class="meta">${esc([s.page ? `Page ${s.page}` : '', s.section].filter(Boolean).join(' · '))}</span>
+          <p>${esc(s.text)}</p></div></li>`).join('');
+      return `<p class="q">${esc(question)}</p>` +
+        (d.standalone_question ? `<p class="read-as">Read as: “${esc(d.standalone_question)}”</p>` : '') +
+        (status ? `<p class="status">${esc(status)}</p>` : '') +
+        `<div class="answer">${body}</div>` +
+        (list ? `<details class="srcbox"><summary>${sources.length} ${sources.length === 1 ? 'source' : 'sources'}</summary><ol class="srcs">${list}</ol></details>` : '');
+    }
+
+    function appendTurn(question, d) {
+      const n = ++turnCount;
+      const el = document.createElement('article');
+      el.className = 'turn'; el.id = `turn-${n}`; el.innerHTML = turnHtml(n, question, d);
+      $('thread').appendChild(el);
+      return el;
+    }
+
+    $('thread').addEventListener('click', (e) => {
+      const b = e.target.closest('.cite'); if (!b) return;
+      const el = $(`t${b.dataset.turn}-src-${b.dataset.n}`); if (!el) return;
+      el.closest('details').open = true;
+      el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+      el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1200);
+    });
+
+    /* ---------- asking ---------- */
+    $('q').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('ask-form').requestSubmit(); } });
+
+    $('ask-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const question = $('q').value.trim(); if (question.length < 3) return;
+      if (!turnCount) $('thread').innerHTML = '';
+      const pending = appendTurn(question, { answer: '', sources: [] });
+      pending.querySelector('.answer').innerHTML = skeleton();
+      pending.scrollIntoView({ block: 'nearest' });
+      $('go').disabled = true; $('q').value = '';
+      const body = { question, top_k: 5 };
+      if (conv) body.conversation_id = conv.id;
+      else if ($('save').checked) body.save = true;
+      else body.history = looseHistory;
+      try {
+        const d = await api(`/workspaces/${ws.workspace_id}/ask`, { method: 'POST', json: body });
+        pending.innerHTML = turnHtml(turnCount, question, d);
+        if (d.conversation_id && !conv) {
+          conv = { id: d.conversation_id };
+          await loadConversations();
+          const exp = new Date(Date.now() + cfg.history_retention_days * 86400000).toISOString();
+          setThreadHeader(document.querySelector(`.conv[data-id="${CSS.escape(conv.id)}"] .t`)?.textContent || question, exp);
+          document.querySelectorAll('.conv').forEach((b) => b.setAttribute('aria-current', b.dataset.id === conv.id));
+        } else if (conv) {
+          loadConversations();
+        } else if (d.outcome !== 'insufficient_evidence') {
+          looseHistory = [...looseHistory, { question, answer: d.answer.slice(0, 4000) }].slice(-3);
+        }
+        $('q').placeholder = 'Ask a follow-up…';
+      } catch (err) {
+        pending.querySelector('.answer').innerHTML = `<p class="err">${esc(err.message)}</p>`;
+        $('q').value = question;
+      } finally { $('go').disabled = false; $('q').focus(); }
+    };
+
+    /* ---------- documents ---------- */
+    async function loadDocs() {
+      clearInterval(pollTimer);
+      let docs;
+      try { docs = await api(`/workspaces/${ws.workspace_id}/documents`); $('docs-err').hidden = true; }
+      catch (err) { $('docs-err').hidden = false; $('docs-err').textContent = err.message; return; }
+      const canEdit = ROLE_RANK[ws.role] >= ROLE_RANK.member;
+      $('docs').innerHTML = docs.map((d) => `<tr>
+        <td>${esc(d.filename)}${d.error ? `<div class="small" style="color:var(--err)">${esc(d.error)}</div>` : ''}</td>
+        <td><span class="pill ${esc(d.status)}">${esc(d.status)}</span></td>
+        <td class="when muted">${esc(when(d.created_at))}</td>
+        <td>${canEdit ? `<button class="ghost danger" data-del="${esc(d.id)}" data-name="${esc(d.filename)}">Delete</button>` : ''}</td></tr>`).join('');
+      $('docs-empty').hidden = docs.length > 0;
+      if (docs.some((d) => d.status === 'queued' || d.status === 'processing')) pollTimer = setInterval(loadDocs, 3000);
+    }
+
+    $('docs').onclick = async (e) => {
+      const b = e.target.closest('[data-del]'); if (!b) return;
+      if (!confirm(`Delete ${b.dataset.name}? Its passages are removed from search.`)) return;
+      try { await api(`/workspaces/${ws.workspace_id}/documents/${b.dataset.del}`, { method: 'DELETE' }); loadDocs(); }
+      catch (err) { $('docs-err').hidden = false; $('docs-err').textContent = err.message; }
+    };
+
+    async function upload(files) {
+      $('docs-err').hidden = true;
+      for (const f of files) {
+        const fd = new FormData(); fd.append('file', f);
+        try { await api(`/workspaces/${ws.workspace_id}/documents`, { method: 'POST', body: fd }); }
+        catch (err) { $('docs-err').hidden = false; $('docs-err').textContent = `${f.name}: ${err.message}`; }
+      }
+      loadDocs();
+    }
+    $('pick').onclick = () => $('files').click();
+    $('files').onchange = (e) => { upload([...e.target.files]); e.target.value = ''; };
+    const drop = $('drop');
+    ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('drag'); }));
+    ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('drag'); }));
+    drop.addEventListener('drop', (e) => upload([...e.dataTransfer.files]));
+
+    /* ---------- boot ---------- */
+    fetch('/auth/config').then((r) => r.json()).then((c) => {
+      cfg = c;
+      if (auth && cfg.workspaces_enabled) start(); else showSignIn();
+    }).catch(() => { document.body.insertAdjacentHTML('beforeend', '<p class="err center">Could not reach the server.</p>'); });
+  </script>
+</body>
+
+</html>

@@ -1,6 +1,7 @@
 """PDF chunking and validation. No network, no model download."""
 
 import pytest
+from pypdf.errors import PdfReadError
 
 from core.pdf import chunk, extract_pages
 
@@ -28,5 +29,5 @@ def test_chunk_drops_tiny_fragments_and_empty_pages():
 
 
 def test_extract_pages_rejects_garbage():
-    with pytest.raises(Exception):
+    with pytest.raises(PdfReadError):
         extract_pages(b"%PDF-1.4 not really a pdf")

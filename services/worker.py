@@ -11,10 +11,12 @@ import logging
 import time
 
 from app.config import get_settings
-from core import db
+from core import conversations, db
 from services.ingestion import run_ingestion
 
 log = logging.getLogger("contexta.worker")
+
+PURGE_INTERVAL_S = 3600.0  # stored conversations past HISTORY_RETENTION_DAYS (P2-14, ADR-006)
 
 
 def run_once(conn, settings) -> bool:
@@ -32,11 +34,24 @@ def run_once(conn, settings) -> bool:
     return True
 
 
+def purge_history(conn, settings) -> int:
+    """Delete stored conversations idle for longer than the retention period. The API already
+    hides them on read; this removes the data."""
+    n = conversations.purge_expired(conn, settings.history_retention_days)
+    if n:
+        log.info("Deleted %d conversation(s) past the %d-day retention", n, settings.history_retention_days)
+    return n
+
+
 def run_forever(poll_interval: float = 2.0) -> None:
     settings = get_settings()
     conn = db.get_conn(settings.database_url)
     log.info("Worker ready, polling every %.1fs", poll_interval)
+    next_purge = 0.0
     while True:
+        if time.monotonic() >= next_purge:
+            purge_history(conn, settings)
+            next_purge = time.monotonic() + PURGE_INTERVAL_S
         if not run_once(conn, settings):
             time.sleep(poll_interval)
 

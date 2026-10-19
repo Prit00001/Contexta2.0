@@ -1,5 +1,6 @@
 """FAISS IndexFlatIP wrapper (exact cosine search on normalized vectors).
 Falls back to a numpy matmul if faiss isn't installed - same results, no extra dependency."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -36,9 +37,9 @@ class VectorStore:
         q = np.ascontiguousarray(query.reshape(1, -1), dtype="float32")
         if self._index is not None:
             scores, idx = self._index.search(q, k)
-            pairs = zip(idx[0], scores[0])
+            pairs = zip(idx[0], scores[0], strict=True)
         else:  # pragma: no cover
             s = (self._mat @ q.T).ravel()
             top = np.argsort(-s)[:k]
-            pairs = zip(top, s[top])
+            pairs = zip(top, s[top], strict=True)
         return [(self.metas[i], float(s)) for i, s in pairs if i >= 0]

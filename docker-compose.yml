@@ -1,21 +1,43 @@
+# Local stack: API + ingestion worker + Postgres/pgvector (workspace platform).
+# The public research API (/ask) works without the database; `docker compose up api` is enough for it.
+#   cp .env.example .env   # optional: add an LLM key
+#   docker compose up --build
 services:
   api:
     build: .
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/contexta
     ports:
       - "8000:8000"
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker:
     build: .
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/contexta
     command: ["python", "-m", "services.worker"]
+    healthcheck:
+      disable: true  # no HTTP server in the worker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  migrate:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/contexta
+    command: ["python", "scripts/migrate.py"]
+    healthcheck:
+      disable: true
+    restart: "no"
     depends_on:
       db:
         condition: service_healthy
@@ -23,7 +45,7 @@ services:
   db:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: postgres  # local development only
       POSTGRES_DB: contexta
     ports:
       - "55432:5432"

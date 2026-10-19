@@ -4,5 +4,17 @@ __pycache__
 .env
 .cache
 .model_cache
+.storage
+.pytest_cache
+.ruff_cache
 tests
+docs
 *.md
+# local eval outputs (gitignored; may hold provider responses)
+eval/*.json
+eval/*.csv
+eval/report.md
+eval/rewrite_report.md
+# frontend: dependencies and build output come from the Dockerfile's node stage
+frontend/node_modules
+frontend/dist

@@ -18,7 +18,8 @@ def make(handler, *names):
 
 
 def ok(text):
-    return httpx.Response(200, json={"choices": [{"message": {"content": text}}]})
+    # Spec-conformant OpenAI chat completion (real providers always include role).
+    return httpx.Response(200, json={"choices": [{"index": 0, "message": {"role": "assistant", "content": text}}]})
 
 
 def test_falls_back_to_next_provider_on_429():

@@ -2,6 +2,7 @@
 the worker is a plain polling loop with no need for async, and any FastAPI route that
 calls into this (Phase 1c) wraps it in asyncio.to_thread, the same pattern
 core/embeddings.py already uses for its sync embed_sync()."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -44,7 +45,7 @@ def get_document(conn, document_id: str) -> dict:
     if row is None:
         raise LookupError(f"document {document_id} not found")
     keys = ["id", "workspace_id", "access_group_id", "filename", "content_type", "storage_path", "status"]
-    return dict(zip(keys, row))
+    return dict(zip(keys, row, strict=True))
 
 
 def set_document_status(conn, document_id: str, status: str, error: Optional[str] = None) -> None:
@@ -103,13 +104,19 @@ def upsert_document(
 def replace_chunks(conn, document_id: str, workspace_id: str, access_group_id, chunks, vectors) -> None:
     with conn.cursor() as cur:
         cur.execute("DELETE FROM chunks WHERE document_id=%s", (document_id,))
-        for chunk, vec in zip(chunks, vectors):
+        for chunk, vec in zip(chunks, vectors, strict=True):
             cur.execute(
                 "INSERT INTO chunks (document_id, workspace_id, access_group_id, chunk_index, page_number, "
                 "section_heading, content, embedding) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
                 (
-                    document_id, workspace_id, access_group_id, chunk.chunk_index,
-                    chunk.page_number, chunk.section_heading, chunk.content, vec,
+                    document_id,
+                    workspace_id,
+                    access_group_id,
+                    chunk.chunk_index,
+                    chunk.page_number,
+                    chunk.section_heading,
+                    chunk.content,
+                    vec,
                 ),
             )
     conn.commit()
@@ -127,7 +134,7 @@ def claim_job(conn) -> Optional[dict]:
     if row is None:
         return None
     keys = ["id", "workspace_id", "document_id", "job_type"]
-    return dict(zip(keys, row))
+    return dict(zip(keys, row, strict=True))
 
 
 def mark_job(conn, job_id: str, status: str, error: Optional[str] = None) -> None:
@@ -174,7 +181,21 @@ def remove_membership(conn, *, workspace_id: str, user_id: str) -> None:
 
 def list_memberships(conn, workspace_id: str):
     with conn.cursor() as cur:
-        cur.execute("SELECT user_id, role, created_at FROM memberships WHERE workspace_id=%s", (workspace_id,))
+        cur.execute(
+            "SELECT m.user_id, m.role, m.created_at, u.email FROM memberships m "
+            "LEFT JOIN auth.users u ON u.id = m.user_id WHERE m.workspace_id = %s ORDER BY m.created_at",
+            (workspace_id,),
+        )
+        return cur.fetchall()
+
+
+def user_workspaces(conn, user_id: str):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT w.id, w.name, m.role, w.org_id FROM memberships m JOIN workspaces w ON w.id = m.workspace_id "
+            "WHERE m.user_id = %s ORDER BY w.name",
+            (user_id,),
+        )
         return cur.fetchall()
 
 
