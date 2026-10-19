@@ -40,6 +40,13 @@ class ProviderSpec:
 
 KNOWN_PROVIDERS = ("groq", "gemini", "openrouter", "custom")
 
+# Default MIN_SCORE per *effective* embedding backend (P2-FR-01), used when MIN_SCORE is unset.
+# hash: calibrated with `eval/run_eval.py --sweep-min-score` (EVALUATION_REPORT.md section 5b) - the old
+# 0.2 left 26% of answerable eval questions with no sources at all on hash embeddings.
+# fastembed (MiniLM): 0.225 from the same sweep on real embeddings (EVALUATION_REPORT section 5d.1;
+# was the informal Phase 1 value 0.2).
+DEFAULT_MIN_SCORE = {"fastembed": 0.225, "hash": 0.075}
+
 # field name -> environment variable (only where they differ from FIELD.upper())
 _ENV_NAMES = {
     "model_cache_dir": "FASTEMBED_CACHE_PATH",
@@ -56,7 +63,11 @@ class Settings(BaseModel):
     embed_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     cache_dir: Path = Path(".cache")
     model_cache_dir: Optional[str] = None
-    min_score: float = Field(0.2, ge=-1.0, le=1.0)
+    min_score: Optional[float] = Field(None, ge=-1.0, le=1.0)  # None -> DEFAULT_MIN_SCORE[backend]
+    # P2-07, on by default since the measured run (EVALUATION_REPORT 5d.2/5f): R@1 0.711 -> 0.783 for
+    # +0.4 s and +~120 MB peak RAM (411 MB measured with both models). RERANK_MODEL=none turns it off.
+    rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    rerank_candidates: int = Field(20, ge=2, le=100)
     hybrid_bm25_enabled: bool = False  # P2-FR-03: off by default - see EVALUATION_REPORT.md for why
     # the measured improvement doesn't yet justify flipping the real default (it only covers
     # local-only retrieval; arXiv-mixed retrieval, the actual default path, is structurally
@@ -69,6 +80,12 @@ class Settings(BaseModel):
     llm_timeout: float = Field(25.0, gt=0, le=120)
     llm_max_attempts: int = Field(2, ge=1, le=3)
     require_llm: bool = False
+    claim_check: Literal["off", "llm"] = "off"  # P2-FR-04: LLM-judge claim support (core.claim_support)
+    # Phase 3 query rewriting (core.query_rewrite); off = the measured baseline
+    query_rewrite: Literal["off", "single", "multi", "decompose", "selective"] = "off"
+    rewrite_providers: tuple[ProviderSpec, ...] = ()  # empty: rewrite with the main provider chain
+    # selective: rewrite when the top score is below this; 0.45 measured on MiniLM (ADR-004 Results)
+    rewrite_gap_score: float = Field(0.45, ge=-1.0, le=1.0)
 
     # arXiv
     arxiv_enabled: bool = True
@@ -88,6 +105,7 @@ class Settings(BaseModel):
     # observability
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["text", "json"] = "text"
+    metrics_enabled: bool = True
 
     # workspace platform (optional)
     database_url: str = Field("", repr=False)
@@ -100,6 +118,11 @@ class Settings(BaseModel):
     supabase_jwt_secret: str = Field("", repr=False)
     redis_url: str = Field("", repr=False)
     workspace_rate_limit_per_min: int = Field(60, ge=0)
+
+    def min_score_for(self, backend: str) -> float:
+        """MIN_SCORE if set explicitly, else the calibrated default for the backend actually in use
+        (which is "hash" when fastembed was requested but failed to load)."""
+        return self.min_score if self.min_score is not None else DEFAULT_MIN_SCORE[backend]
 
     @property
     def max_pdf_bytes(self) -> int:
@@ -179,7 +202,7 @@ def load_settings() -> Settings:
     """Build Settings from the environment. Raises ConfigError on invalid configuration."""
     raw: dict[str, object] = {}
     for name in Settings.model_fields:
-        if name in ("providers", "llm_provider_order", "allowed_origins"):
+        if name in ("providers", "llm_provider_order", "allowed_origins", "rewrite_providers"):
             continue
         value = _env(_ENV_NAMES.get(name, name.upper()))
         if value is not None:
@@ -188,11 +211,23 @@ def load_settings() -> Settings:
         raw["cache_dir"] = "/tmp/contexta-cache"  # Vercel's filesystem is read-only except /tmp
     if "log_level" in raw:
         raw["log_level"] = str(raw["log_level"]).upper()
+    if str(raw.get("rerank_model", "")).lower() in ("none", "off", "false", "0"):
+        raw["rerank_model"] = ""  # explicit opt-out of the default reranker
     if (origins := _csv(_env("ALLOWED_ORIGINS"))) is not None:
         raw["allowed_origins"] = origins
     order = _csv(_env("LLM_PROVIDERS")) or KNOWN_PROVIDERS
     raw["llm_provider_order"] = order
     raw["providers"] = _build_providers(order, str(raw.get("site_url", "http://localhost:8000")))
+    if (rewrite_order := _csv(_env("REWRITE_PROVIDERS"))) is not None:
+        unknown = [p for p in rewrite_order if p not in KNOWN_PROVIDERS]
+        if unknown:
+            raise ConfigError(f"Invalid configuration - REWRITE_PROVIDERS: unknown provider(s) {unknown}")
+        raw["rewrite_providers"] = _build_providers(rewrite_order, str(raw.get("site_url", "http://localhost:8000")))
+        if not raw["rewrite_providers"]:
+            raise ConfigError(
+                "Invalid configuration - REWRITE_PROVIDERS: none of the listed providers is configured "
+                "(missing API key, or LLM_BASE_URL+LLM_MODEL for custom)"
+            )
     try:
         return Settings.model_validate(raw)
     except ValidationError as exc:

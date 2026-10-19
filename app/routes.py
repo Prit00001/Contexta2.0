@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-import time
-from collections import defaultdict, deque
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.observability import question_fingerprint
 from app.schemas import (
@@ -19,33 +18,12 @@ from app.schemas import (
     ReadyCheck,
     ReadyResponse,
 )
+from core import metrics
 from core.pdf import chunk, extract_pages
 from core.storage import safe_filename
 
 router = APIRouter()
 log = logging.getLogger("contexta.api")
-
-
-class RateLimiter:
-    """Sliding-window limiter per client IP. Protects your free-tier API keys from abuse."""
-
-    def __init__(self, per_minute: int):
-        self.per_minute = per_minute
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
-
-    def allow(self, ip: str) -> bool:
-        if self.per_minute <= 0:
-            return True
-        now = time.monotonic()
-        q = self._hits[ip]
-        while q and now - q[0] > 60:
-            q.popleft()
-        if len(q) >= self.per_minute:
-            return False
-        q.append(now)
-        if len(self._hits) > 5000:  # bound memory
-            self._hits = defaultdict(deque, {k: v for k, v in self._hits.items() if v})
-        return True
 
 
 def _client_ip(request: Request) -> str:
@@ -68,8 +46,9 @@ def _request_id(request: Request) -> str:
     return getattr(request.state, "request_id", "")
 
 
-def _check_rate_limit(request: Request) -> None:
-    if not request.app.state.limiter.allow(_client_ip(request)):
+async def _check_rate_limit(request: Request, endpoint: str) -> None:
+    if not await request.app.state.limiter.allow(f"ask:{_client_ip(request)}"):
+        metrics.RATE_LIMITED.labels(endpoint).inc()
         log.info("rate limited", extra={"event": "ratelimit", "category": "rate_limited"})
         raise HTTPException(
             429,
@@ -79,6 +58,9 @@ def _check_rate_limit(request: Request) -> None:
 
 
 def _log_result(kind: str, question: str, result: dict, **fields) -> None:
+    metrics.ANSWERS.labels(kind, result["outcome"], str(bool(result["cached"])).lower()).inc()
+    if not result["cached"] and (total := result.get("timings_ms", {}).get("total")) is not None:
+        metrics.ANSWER_SECONDS.labels(kind).observe(total / 1000)
     category = {"insufficient_evidence": "insufficient_evidence", "extractive_fallback": "llm_unavailable"}.get(
         result["outcome"]
     )
@@ -121,10 +103,54 @@ async def ask(body: AskRequest, request: Request):
     """Runs the LangGraph research workflow: validate -> retrieve (FAISS library + optional live arXiv)
     -> generate (LLM provider chain) -> validate citations -> respond. Falls back to an extractive
     answer when no LLM succeeds, and says so when nothing relevant is found (`outcome`)."""
-    _check_rate_limit(request)
-    result = await request.app.state.service.ask(body.question, body.top_k, body.use_arxiv)
+    await _check_rate_limit(request, "ask")
+    history = [t.model_dump() for t in body.history]
+    result = await request.app.state.service.ask(body.question, body.top_k, body.use_arxiv, history)
     _log_result("ask", body.question, result, top_k=body.top_k, use_arxiv=body.use_arxiv)
     return {**result, "request_id": _request_id(request)}
+
+
+def _sse(event: str, data) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@router.post(
+    "/ask/stream",
+    summary="Same as /ask, streamed as server-sent events",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "Events: `stage`, `sources`, `token` (raw draft text), `reset` (draft discarded, "
+            "regenerating), then `done` with the full /ask response - or `error` with `status` and `detail`. "
+            "Keep `done.answer`, not the concatenated tokens: hallucinated [n] markers are only removed there.",
+        },
+        **ERROR_RESPONSES,
+    },
+)
+async def ask_stream(body: AskRequest, request: Request):
+    """P2-13: same workflow, cache, rate limit and response as `/ask`; tokens arrive as the model writes."""
+    await _check_rate_limit(request, "ask")
+    request_id = _request_id(request)
+
+    async def events():
+        try:
+            history = [t.model_dump() for t in body.history]
+            stream = request.app.state.service.ask_stream(body.question, body.top_k, body.use_arxiv, history)
+            async for kind, payload in stream:
+                if kind == "done":
+                    _log_result("ask", body.question, payload, top_k=body.top_k, use_arxiv=body.use_arxiv, stream=True)
+                    payload = {**payload, "request_id": request_id}
+                yield _sse(kind, payload)
+        except HTTPException as exc:
+            yield _sse("error", {"status": exc.status_code, "detail": exc.detail, "request_id": request_id})
+        except Exception:  # noqa: BLE001 - headers are already sent; report in-band, details stay in logs
+            log.exception("stream failed", extra={"event": "ask.stream", "category": "internal"})
+            yield _sse("error", {"status": 500, "detail": "Internal server error", "request_id": request_id})
+
+    return StreamingResponse(
+        events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 
 @router.post(
@@ -142,7 +168,7 @@ async def ask_pdf(
     file: UploadFile = File(...),
     top_k: int = Form(5, ge=1, le=10),
 ):
-    _check_rate_limit(request)
+    await _check_rate_limit(request, "ask_pdf")
 
     max_bytes = request.app.state.settings.max_pdf_bytes
     data = await file.read(max_bytes + 1)  # never buffer more than the limit
@@ -158,7 +184,7 @@ async def ask_pdf(
     try:
         pages = await run_in_threadpool(extract_pages, data)
     except Exception:  # noqa: BLE001 - pypdf raises many types on bad input
-        raise HTTPException(422, "Couldn't read this PDF. It may be password-protected or corrupted.")
+        raise HTTPException(422, "Couldn't read this PDF. It may be password-protected or corrupted.") from None
 
     chunks = await run_in_threadpool(chunk, pages)
     if not chunks:
@@ -237,6 +263,12 @@ async def ready(request: Request):
         checks["llm"] = ReadyCheck(ok=False, detail="all providers cooling down after errors")
     else:
         checks["llm"] = ReadyCheck(ok=True, detail="available: " + ", ".join(available))
+    reranker = getattr(service, "reranker", None)
+    if reranker is not None:
+        checks["reranker"] = ReadyCheck(
+            ok=reranker.available,
+            detail=reranker.model_name + ("" if reranker.available else f" - failed to load ({reranker.error}); off"),
+        )
     checks["arxiv"] = ReadyCheck(ok=True, detail="enabled" if st.settings.arxiv_enabled else "disabled")
     if not getattr(st, "db_configured", st.db_pool is not None):
         checks["database"] = ReadyCheck(ok=True, detail="not configured (workspace features off)")
@@ -257,3 +289,12 @@ async def ready(request: Request):
         status = "degraded"
     body = ReadyResponse(status=status, checks=checks)
     return JSONResponse(body.model_dump(), status_code=503 if status == "not_ready" else 200)
+
+
+@router.get("/metrics", include_in_schema=False)
+async def metrics_endpoint(request: Request):
+    """Prometheus exposition format. No user content (see core.metrics); disable with METRICS_ENABLED=false."""
+    if not request.app.state.settings.metrics_enabled:
+        raise HTTPException(404, "Not Found")
+    body, content_type = metrics.render()
+    return Response(body, media_type=content_type)

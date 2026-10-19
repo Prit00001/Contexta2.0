@@ -10,3 +10,8 @@ __pycache__
 tests
 docs
 *.md
+# local eval outputs (gitignored; may hold provider responses)
+eval/*.json
+eval/*.csv
+eval/report.md
+eval/rewrite_report.md

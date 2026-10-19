@@ -117,8 +117,15 @@ def test_request_to_answer_with_library_and_arxiv(env):
     assert [c["marker"] for c in d["citations"]] == [1, 2]
     assert d["citations"][0]["chunk_id"] == d["sources"][0]["chunk_id"]
     assert all(cl["status"] == "cited" for cl in d["claims"])
-    assert d["citation_check"] == {"verification": "marker_only", "valid_markers": 2, "removed_markers": [],
-                                   "uncited_claims": 0}  # fmt: skip
+    assert d["citation_check"] == {
+        "verification": "marker_only",
+        "valid_markers": 2,
+        "removed_markers": [],
+        "uncited_claims": 0,
+        "supported_claims": None,
+        "not_supported_claims": None,
+        "unknown_claims": None,
+    }  # fmt: skip  (claim counts: CLAIM_CHECK=llm only)
     assert [w["stage"] for w in d["workflow"]] == ["validate_request", "retrieve", "generate", "validate_answer",
                                                    "finalize"]  # fmt: skip
     assert any(s["source"] == "arxiv" for s in d["sources"]) and any(s["source"] == "local" for s in d["sources"])

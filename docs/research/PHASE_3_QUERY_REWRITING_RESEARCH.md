@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Preliminary (Phase 1 deliverable; nothing here is implemented) |
+| Status | Conditions 1–5 implemented and measured with Groq gpt-oss-120b (2026-10-18): H1 half supported, H2–H4 not supported as stated, H5 untested — [ADR-004 Results](../decisions/ADR-004-query-rewriting.md#results-2026-10-18-real-llm) |
 | Date | 2026-10-16 |
 | Method | Publication details verified on ACL Anthology / arXiv; papers read via their PDFs or HTML versions; summaries are paraphrased |
 

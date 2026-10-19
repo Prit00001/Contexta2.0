@@ -4,12 +4,16 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 ASK_REQUEST_EXAMPLE = {
     "question": "How does retrieval-augmented generation reduce hallucination?",
     "top_k": 3,
     "use_arxiv": True,
 }
+
+
+class Turn(BaseModel):
+    question: str = Field(..., min_length=1, max_length=500)
+    answer: str = Field("", max_length=4000)
 
 
 class AskRequest(BaseModel):
@@ -18,6 +22,12 @@ class AskRequest(BaseModel):
     question: str = Field(..., min_length=3, max_length=500, description="The research question")
     top_k: int = Field(5, ge=1, le=10, description="Maximum number of sources to use")
     use_arxiv: bool = Field(True, description="Also search arXiv live (ignored if ARXIV_ENABLED=false)")
+    history: list[Turn] = Field(
+        [],
+        max_length=3,
+        description="Previous turns (oldest first) when `question` is a follow-up. Used only to rewrite the "
+        "follow-up into a standalone question for this request; never stored or logged by the server.",
+    )
 
 
 class Source(BaseModel):
@@ -48,16 +58,26 @@ class ClaimOut(BaseModel):
     text: str
     markers: list[int] = []
     status: Literal["cited", "uncited"]
+    support: Optional[Literal["supported", "not_supported", "unknown"]] = Field(
+        None, description="Only when CLAIM_CHECK=llm: does the cited text back this claim? (unmeasured LLM judge)"
+    )
+    support_method: Optional[Literal["quote", "llm_judge"]] = Field(
+        None, description="quote: claim appears verbatim in a cited source; llm_judge: decided by an LLM"
+    )
 
 
 class CitationCheck(BaseModel):
-    verification: Literal["marker_only"] = Field(
+    verification: Literal["marker_only", "claim_support"] = Field(
         "marker_only",
-        description="Markers are checked against retrieved sources; whether a source entails a claim is NOT verified",
+        description="marker_only: markers are checked against retrieved sources, entailment is NOT verified. "
+        "claim_support: each cited claim was also checked against its cited text (see claims[].support)",
     )
     valid_markers: int = 0
     removed_markers: list[int] = Field([], description="Hallucinated [n] numbers removed from the answer")
     uncited_claims: int = 0
+    supported_claims: Optional[int] = None
+    not_supported_claims: Optional[int] = None
+    unknown_claims: Optional[int] = None
 
 
 class WorkflowStep(BaseModel):
@@ -85,6 +105,12 @@ class AskResponse(BaseModel):
     claims: list[ClaimOut] = []
     citation_check: CitationCheck = CitationCheck()
     workflow: list[WorkflowStep] = []
+    query_rewrites: list[str] = Field(
+        [], description="Search queries the rewriter produced (QUERY_REWRITE != off); empty if none were used"
+    )
+    standalone_question: Optional[str] = Field(
+        None, description="With `history`: the follow-up rewritten as a standalone question (what was searched)"
+    )
 
 
 ASK_RESPONSE_EXAMPLE = {
@@ -204,6 +230,12 @@ class WorkspaceAskResponse(BaseModel):
     claims: list[ClaimOut] = []
     citation_check: CitationCheck = CitationCheck()
     workflow: list[WorkflowStep] = []
+    query_rewrites: list[str] = Field(
+        [], description="Search queries the rewriter produced (QUERY_REWRITE != off); empty if none were used"
+    )
+    standalone_question: Optional[str] = Field(
+        None, description="With `history`: the follow-up rewritten as a standalone question (what was searched)"
+    )
 
 
 # ---- Workspace bootstrap, membership, API keys (Phase 1d) ----

@@ -108,19 +108,22 @@ class ResearchRetriever(_AsyncOnlyRetriever):
     arxiv_budget_s: float = 9.0
     min_score: float = 0.2
     hybrid_bm25_enabled: bool = False  # P2-FR-03
+    reranker: Any = None  # core.reranker.Reranker (P2-07); None = no reranking
+    rerank_candidates: int = 20
 
     async def _arxiv_candidates(self, question: str, qvec: np.ndarray) -> list[tuple[dict, float]]:
         papers = await self.arxiv.search(question)
         if not papers:
             return []
         vecs = await self.embedder.embed([p["text"] for p in papers])
-        return [(p, float(v @ qvec)) for p, v in zip(papers, vecs)]
+        return [(p, float(v @ qvec)) for p, v in zip(papers, vecs, strict=True)]
 
     async def aretrieve(self, question: str, top_k: int, use_arxiv: bool = True, **_: Any) -> RetrievalResult:
         warnings: list[str] = []
         t0 = time.perf_counter()
         qvec = (await self.embedder.embed([question]))[0]
-        candidates = self.library.search(qvec, top_k * 2)
+        reranking = self.reranker is not None and self.reranker.available
+        candidates = self.library.search(qvec, max(top_k * 2, self.rerank_candidates if reranking else 0))
         t_local = time.perf_counter()
         if use_arxiv and self.arxiv_enabled:
             try:
@@ -142,14 +145,18 @@ class ResearchRetriever(_AsyncOnlyRetriever):
             passed_keys = {_dedupe_key(s) for s in hybrid_ranked}
             bm25_hits = self.library.bm25_search(question, top_k * 2)
             bm25_ranked = [{**d, "score": s} for d, s in bm25_hits if _dedupe_key(d) in passed_keys]
-            ranked = rrf_fuse([hybrid_ranked, bm25_ranked])[:top_k]
+            ordered = rrf_fuse([hybrid_ranked, bm25_ranked])
         else:
-            ranked = hybrid_ranked[:top_k]
-        return RetrievalResult(
-            sources=[normalize_source(s) for s in ranked],
-            warnings=warnings,
-            timings_ms={"local": round((t_local - t0) * 1000), "arxiv": round((t_arxiv - t_local) * 1000)},
-        )
+            ordered = hybrid_ranked
+        timings = {"local": round((t_local - t0) * 1000), "arxiv": round((t_arxiv - t_local) * 1000)}
+        if reranking and ordered:
+            # Reorders only what already passed MIN_SCORE (core/reranker.py), never widens it.
+            t_rerank = time.perf_counter()
+            ranked = await self.reranker.rerank(question, ordered[: self.rerank_candidates], top_k)
+            timings["rerank"] = round((time.perf_counter() - t_rerank) * 1000)
+        else:
+            ranked = ordered[:top_k]
+        return RetrievalResult(sources=[normalize_source(s) for s in ranked], warnings=warnings, timings_ms=timings)
 
 
 class PdfChunkRetriever(_AsyncOnlyRetriever):

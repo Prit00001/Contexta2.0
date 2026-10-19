@@ -43,3 +43,6 @@ redis>=5.0,<6.0
 # Pure-Python BM25Okapi, no external service; small, unmaintained-but-stable, standard IR
 # baseline. Used to RRF-fuse a sparse ranking with the existing dense+keyword hybrid score.
 rank-bm25>=0.2,<1.0
+
+# --- observability (Phase 2, P2-FR-07): GET /metrics in Prometheus exposition format
+prometheus-client>=0.20,<1.0

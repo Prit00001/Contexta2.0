@@ -8,8 +8,9 @@ What "validated" means here - deliberately narrow and stated in every response a
 * each answer sentence is a **claim** whose status is ``cited`` (has >= 1 valid marker) or
   ``uncited``.
 
-It does *not* check that the cited passage entails the claim; that needs an NLI/LLM judge and
-is Phase 2 work. Clients must not present ``cited`` as "verified true".
+It does *not* check that the cited passage entails the claim; that is ``core.claim_support``
+(``CLAIM_CHECK=llm``, off by default), which switches ``verification`` to ``"claim_support"``.
+Clients must not present ``cited`` as "verified true".
 """
 
 from __future__ import annotations
@@ -21,12 +22,17 @@ from core.text import split_sentences
 
 _GROUP = re.compile(r"\[(\s*\d+(?:\s*[,;]\s*\d+)+\s*)\]")  # [1, 2] / [1;3]
 _MARKER = re.compile(r"\[(\d+)\]")
+_WIDE = re.compile(r"[【［]\s*([0-9０-９]+(?:\s*[,;，、]\s*[0-9０-９]+)*)\s*[】］]")
+_FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９，、", "0123456789,,")
 _MARKERS_AFTER_PUNCT = re.compile(r"([.!?])((?:\s*\[\d+\])+)")
 _SPACE_BEFORE_PUNCT = re.compile(r"\s+([.,;:!?])")
 
 
 def normalise_markers(text: str) -> str:
-    """Rewrite grouped markers like ``[1, 3]`` as ``[1][3]`` (the format the UI links)."""
+    """Rewrite grouped markers like ``[1, 3]`` as ``[1][3]`` (the format the UI links), and full-width
+    brackets ``【1】`` / ``［1］`` as ``[1]``: gpt-oss-120b cites that way, and the markers were missed,
+    so correctly cited answers were rejected as uncited (EVALUATION_REPORT 5e)."""
+    text = _WIDE.sub(lambda m: f"[{m.group(1).translate(_FULLWIDTH_DIGITS)}]", text)
     return _GROUP.sub(lambda m: "".join(f"[{n.strip()}]" for n in re.split(r"[,;]", m.group(1))), text)
 
 
@@ -68,12 +74,16 @@ class CitationReport:
         return bool(self.answer.strip()) and (self.valid_markers > 0 or not has_sources)
 
     def summary(self) -> dict:
-        return {
+        out = {
             "verification": self.verification,
             "valid_markers": self.valid_markers,
             "removed_markers": self.removed_markers,
             "uncited_claims": self.uncited_claims,
         }
+        if self.verification == "claim_support":  # core.claim_support ran (CLAIM_CHECK=llm)
+            for verdict in ("supported", "not_supported", "unknown"):
+                out[f"{verdict}_claims"] = sum(1 for c in self.claims if c.get("support") == verdict)
+        return out
 
 
 def split_claims(answer: str) -> list[dict]:

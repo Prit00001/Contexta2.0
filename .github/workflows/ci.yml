@@ -47,7 +47,8 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - name: Apply local auth shim and migrations
         run: |
-          sudo apt-get install -y --no-install-recommends postgresql-client
+          # redis-server: tests/integration/test_shared_state.py starts its own on a free port (P2-FR-07)
+          sudo apt-get install -y --no-install-recommends postgresql-client redis-server
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/local_shim.sql
           python scripts/migrate.py
       # No API keys: the default suite never calls paid providers (all outbound HTTP is mocked).

@@ -1,6 +1,6 @@
 """Builds tiny PDF/DOCX fixtures in-memory (no checked-in binaries, no network) to
 exercise each parser."""
-from core.parsers import parse_docx, parse_document, parse_pdf, parse_text
+from core.parsers import parse_document, parse_docx, parse_pdf, parse_text
 
 
 def test_parse_text_tracks_markdown_headings():

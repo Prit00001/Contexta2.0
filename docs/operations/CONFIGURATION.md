@@ -20,6 +20,10 @@ A provider is *configured* when its key is set (for `custom`: when both `LLM_BAS
 | `LLM_PROVIDERS` | `groq,gemini,openrouter,custom` | no | Comma-separated subset/order; unknown names are an error |
 | `LLM_TIMEOUT` | `25` | no | Seconds per provider call, (0, 120] |
 | `LLM_MAX_ATTEMPTS` | `2` | no | Generation attempts per question in the workflow, 1–3 |
+| `QUERY_REWRITE` | `off` | Phase 3 experiment: `single` (retrieve with one rewrite), `multi` (3 rewrites + original, fused), `decompose` (sub-questions + original), `selective` (rewrite only when retrieval looks weak). One extra LLM call per uncached request; rewrites search the local library only. [ADR-004](../decisions/ADR-004-query-rewriting.md) |
+| `REWRITE_PROVIDERS` | – | Provider chain for rewriting only (e.g. `custom` for a local Ollama); default: `LLM_PROVIDERS` |
+| `REWRITE_GAP_SCORE` | `0.45` | `selective`: rewrite when the best retrieval score is below this. 0.45 measured on MiniLM: fires on 38% of questions and beats rewriting every question with `multi` (ADR-004 Results) |
+| `CLAIM_CHECK` | `off` | `llm`: after citation validation, check each cited claim against its cited text — verbatim quotes locally, the rest in one LLM-judge call through the provider chain. Adds `claims[].support` and claim counts to `citation_check`. Costs one extra LLM call per uncached answer; judge precision not yet measured |
 | `REQUIRE_LLM` | `false` | no | `true`: refuse to start with no configured provider |
 
 No provider configured → the app still answers (`outcome: extractive_fallback`) and `/ready` reports `degraded`.
@@ -32,7 +36,9 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 | `EMBED_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Must be a fastembed-supported model |
 | `FASTEMBED_CACHE_PATH` | fastembed default | Model cache directory (Docker: `/app/.model_cache`, baked in) |
 | `CACHE_DIR` | `.cache` (`/tmp/contexta-cache` on Vercel) | Library embedding cache (`embeddings.npz`) |
-| `MIN_SCORE` | `0.2` | Hybrid-score cut for library/arXiv sources, [-1, 1] |
+| `RERANK_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` | Cross-encoder reranking (P2-07), **on by default** since measured: R@1 0.711 → 0.783, R@5 0.977 → 0.991 for +0.4 s per search and ~120 MB RAM (411 MB peak with both models). Reorders sources that passed `MIN_SCORE`, never adds any. Baked into the Docker image; unloadable → off, reported by `/ready`. `none` disables |
+| `RERANK_CANDIDATES` | `20` | How many retrieved sources the reranker scores before keeping `top_k` |
+| `MIN_SCORE` | per backend | Hybrid-score cut for library/arXiv sources, [-1, 1]. Unset: `0.225` on fastembed (MiniLM), `0.075` on hash embeddings (incl. the fallback) — calibrated with `eval/run_eval.py --sweep-min-score` |
 | `ARXIV_ENABLED` | `true` | Global switch; per request `use_arxiv` |
 | `ARXIV_MAX_RESULTS` | `12` | 1–50 |
 | `ARXIV_BUDGET_S` | `9` | Total arXiv time budget per request |
@@ -43,9 +49,9 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 
 | Variable | Default | Notes |
 |---|---|---|
-| `RATE_LIMIT_PER_MIN` | `20` | Per client IP on `/ask`, `/ask-pdf`; `0` disables |
+| `RATE_LIMIT_PER_MIN` | `20` | Per client IP on `/ask`, `/ask-pdf`; `0` disables. Shared across instances when `REDIS_URL` is set |
 | `TRUST_PROXY_HEADERS` | `true` | Use the right-most `X-Forwarded-For` hop (the one your platform's proxy appends). Set `false` when clients connect directly |
-| `ANSWER_CACHE_TTL` | `3600` | Seconds; only LLM answers (and empty results) are cached |
+| `ANSWER_CACHE_TTL` | `3600` | Seconds; only LLM answers (and empty results) are cached. In Redis (shared) when `REDIS_URL` is set, else per process |
 | `ALLOWED_ORIGINS` | `*` | CORS, comma-separated |
 | `APP_SITE_URL` | `http://localhost:8000` | Sent to OpenRouter |
 | `MAX_PDF_MB` | `4` | `/ask-pdf` upload limit (Vercel rejects bodies > ~4.5 MB) |
@@ -57,6 +63,7 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 |---|---|---|
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `LOG_FORMAT` | `text` | `json`: one object per line (Docker image default) |
+| `METRICS_ENABLED` | `true` | `GET /metrics` (Prometheus). Counters/histograms by endpoint, outcome, stage, provider; no user content |
 
 Logged per request: `request_id`, method, path, status, `duration_ms`, failure `category`. Per workflow stage: `stage`, `status`, `duration_ms`. Per answer: `outcome`, number of sources, provider, `question_len`, `question_sha8`. Never logged: question text, API keys, DSNs (a redaction filter is a backstop). LangSmith tracing is not enabled by the app; it would only activate if `LANGSMITH_TRACING`/`LANGCHAIN_TRACING_V2` were set, which sends prompts to LangSmith — leave unset unless intended.
 
@@ -71,7 +78,7 @@ Logged per request: `request_id`, method, path, status, `duration_ms`, failure `
 | `STORAGE_DIR` | `.storage` | Local backend root |
 | `STORAGE_BUCKET` | `documents` | Supabase bucket |
 | `MAX_UPLOAD_MB` | `20` | Workspace uploads |
-| `REDIS_URL` | – | Shared workspace rate limit; in-memory fallback |
+| `REDIS_URL` | – | Shared answer cache, `/ask` and workspace rate limits across instances; falls back to in-memory if unset or unreachable |
 | `WORKSPACE_RATE_LIMIT_PER_MIN` | `60` | |
 
 ## Safe local setup

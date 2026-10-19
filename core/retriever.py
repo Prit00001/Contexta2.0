@@ -31,7 +31,7 @@ class Retriever:
     def _load_cache(self) -> dict[str, np.ndarray]:
         try:
             with np.load(self.cache_path, allow_pickle=False) as z:
-                return dict(zip(z["keys"].tolist(), z["vecs"]))
+                return dict(zip(z["keys"].tolist(), z["vecs"], strict=True))
         except Exception:  # missing/corrupt cache is fine
             return {}
 
@@ -53,12 +53,14 @@ class Retriever:
         if missing:
             log.info("Embedding %d/%d documents (rest from cache)", len(missing), len(docs))
             vecs = self.embedder.embed_sync([texts[i] for i in missing])
-            for i, v in zip(missing, vecs):
+            for i, v in zip(missing, vecs, strict=True):
                 cache[keys[i]] = v
             self._save_cache({k: cache[k] for k in keys})
         self.store = VectorStore(self.embedder.dim)
-        self.store.add(np.vstack([cache[k] for k in keys]), [{**d, "text": t} for d, t in zip(docs, texts)])
-        self._bm25_metas = [{**d, "text": t} for d, t in zip(docs, texts)]
+        self.store.add(
+            np.vstack([cache[k] for k in keys]), [{**d, "text": t} for d, t in zip(docs, texts, strict=True)]
+        )
+        self._bm25_metas = [{**d, "text": t} for d, t in zip(docs, texts, strict=True)]
         self._bm25 = BM25Okapi([tokenize(t) for t in texts]) if texts else None
 
     @property

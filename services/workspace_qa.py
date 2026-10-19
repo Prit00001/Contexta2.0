@@ -102,4 +102,5 @@ async def ask_workspace(
         "claims": report.claims,
         "citation_check": report.summary(),
         "workflow": state["trace"],
+        "query_rewrites": state.get("query_rewrites", []),
     }
