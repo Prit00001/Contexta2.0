@@ -135,7 +135,9 @@ openai==3.31.0
     #   -r requirements.in
     #   langchain-openai
 opentelemetry-api==1.45.1
-    # via fastapi
+    # via
+    #   -r requirements.in
+    #   fastapi
 orjson==3.13.0
     # via
     #   langgraph-sdk

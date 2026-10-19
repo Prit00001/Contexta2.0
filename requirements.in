@@ -46,3 +46,7 @@ rank-bm25>=0.2,<1.0
 
 # --- observability (Phase 2, P2-FR-07): GET /metrics in Prometheus exposition format
 prometheus-client>=0.20,<1.0
+
+# --- tracing (Phase 2, P2-15): spans per request, workflow stage and LLM call. The API alone is a
+# no-op (it was already installed via langsmith); exporting needs requirements-otel.txt + TRACING_ENABLED.
+opentelemetry-api>=1.30,<2.0

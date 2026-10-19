@@ -17,9 +17,10 @@ import time
 from dataclasses import dataclass, field
 
 import httpx
+from opentelemetry.trace import Status, StatusCode
 
 from app.config import ProviderSpec
-from core import metrics
+from core import metrics, tracing
 from core.citations import strip_invalid_markers
 from core.llm import LLMError, invoke_chat, make_chat_model
 from core.prompts import build_prompt_messages
@@ -95,39 +96,43 @@ class Generator:
             if self._cooldown_until.get(p.name, 0) > time.monotonic():
                 warnings.append(f"{p.name} is cooling down")
                 continue
-            t0 = time.perf_counter()
-            try:
-                text = await invoke_chat(self._models[p.name], p, messages)
-            except LLMError as exc:
-                self._cooldown_until[p.name] = time.monotonic() + exc.cooldown
-                metrics.LLM_CALLS.labels(p.name, "error").inc()
-                warnings.append(f"{p.name}: {exc}")
-                log.warning(
-                    "LLM provider %s failed: %s",
+            with tracing.span("llm.call", provider=p.name, model=p.model) as span:
+                t0 = time.perf_counter()
+                try:
+                    text = await invoke_chat(self._models[p.name], p, messages)
+                except LLMError as exc:
+                    self._cooldown_until[p.name] = time.monotonic() + exc.cooldown
+                    tracing.set_attributes(span, status="error", cooldown_s=exc.cooldown)
+                    span.set_status(Status(StatusCode.ERROR, type(exc).__name__))
+                    metrics.LLM_CALLS.labels(p.name, "error").inc()
+                    warnings.append(f"{p.name}: {exc}")
+                    log.warning(
+                        "LLM provider %s failed: %s",
+                        p.name,
+                        exc,
+                        extra={
+                            "event": "llm.call",
+                            "provider": p.name,
+                            "status": "error",
+                            "category": "llm_unavailable",
+                            "duration_ms": round((time.perf_counter() - t0) * 1000),
+                            "cooldown_s": exc.cooldown,
+                        },
+                    )
+                    continue
+                metrics.LLM_CALLS.labels(p.name, "ok").inc()
+                tracing.set_attributes(span, status="ok")
+                log.info(
+                    "LLM provider %s answered",
                     p.name,
-                    exc,
                     extra={
                         "event": "llm.call",
                         "provider": p.name,
-                        "status": "error",
-                        "category": "llm_unavailable",
+                        "status": "ok",
                         "duration_ms": round((time.perf_counter() - t0) * 1000),
-                        "cooldown_s": exc.cooldown,
                     },
                 )
-                continue
-            metrics.LLM_CALLS.labels(p.name, "ok").inc()
-            log.info(
-                "LLM provider %s answered",
-                p.name,
-                extra={
-                    "event": "llm.call",
-                    "provider": p.name,
-                    "status": "ok",
-                    "duration_ms": round((time.perf_counter() - t0) * 1000),
-                },
-            )
-            return text, p, warnings
+                return text, p, warnings
         return None, None, warnings
 
     async def generate(self, question: str, sources: list[dict], feedback: str | None = None) -> GenResult:

@@ -18,8 +18,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 # Pinned lockfile -> reproducible image.
-COPY requirements.txt .
+COPY requirements.txt requirements-otel.txt ./
 RUN pip install -r requirements.txt
+# Optional OpenTelemetry export (TRACING_ENABLED=true): docker build --build-arg WITH_OTEL=true .
+ARG WITH_OTEL=false
+RUN if [ "$WITH_OTEL" = "true" ]; then pip install -r requirements-otel.txt; fi
 
 # Bake the embedding model and the reranker (RERANK_MODEL default) into the image so cold starts don't download it (and so a missing
 # network at runtime can't silently drop retrieval to hash embeddings).

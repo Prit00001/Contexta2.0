@@ -15,7 +15,7 @@ from app.observability import RequestContextMiddleware, configure_logging
 from app.routes import router
 from app.routes_admin import router as admin_router
 from app.routes_workspace import router as workspace_router
-from core import db
+from core import db, tracing
 from core.cache import make_answer_cache
 from core.embeddings import Embedder
 from core.generator import Generator
@@ -34,6 +34,7 @@ log = logging.getLogger("contexta")
 async def lifespan(app: FastAPI):
     s = get_settings()
     configure_logging(s.log_level, s.log_format)
+    tracing.configure_tracing(s.tracing_enabled)
     embedder = Embedder(s.embed_backend, s.embed_model, s.model_cache_dir)
     retriever = Retriever(embedder, s.cache_dir / "embeddings.npz")
     retriever.build(DOCUMENTS)
@@ -81,6 +82,7 @@ async def lifespan(app: FastAPI):
         extra={"event": "startup", "status": "degraded" if embedder.degraded else "ok"},
     )
     yield
+    tracing.shutdown_tracing()
     await client.aclose()
     if redis is not None:
         await redis.aclose()

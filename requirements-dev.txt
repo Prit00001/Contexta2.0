@@ -73,6 +73,8 @@ fsspec==2026.9.0
     # via
     #   -c requirements.txt
     #   huggingface-hub
+googleapis-common-protos==1.75.5
+    # via opentelemetry-exporter-otlp-proto-http
 h11==0.16.0
     # via
     #   -c requirements.txt
@@ -212,7 +214,31 @@ openai==3.31.0
 opentelemetry-api==1.45.1
     # via
     #   -c requirements.txt
+    #   -r requirements.in
     #   fastapi
+    #   opentelemetry-exporter-http-transport
+    #   opentelemetry-exporter-otlp-proto-http
+    #   opentelemetry-sdk
+    #   opentelemetry-semantic-conventions
+opentelemetry-exporter-http-transport==0.66b1
+    # via opentelemetry-exporter-otlp-proto-http
+opentelemetry-exporter-otlp-common==0.66b1
+    # via opentelemetry-exporter-otlp-proto-http
+opentelemetry-exporter-otlp-proto-common==1.45.1
+    # via opentelemetry-exporter-otlp-proto-http
+opentelemetry-exporter-otlp-proto-http==1.45.1
+    # via -r requirements-otel.in
+opentelemetry-proto==1.45.1
+    # via
+    #   opentelemetry-exporter-otlp-proto-common
+    #   opentelemetry-exporter-otlp-proto-http
+opentelemetry-sdk==1.45.1
+    # via
+    #   -r requirements-otel.in
+    #   opentelemetry-exporter-otlp-common
+    #   opentelemetry-exporter-otlp-proto-http
+opentelemetry-semantic-conventions==0.66b1
+    # via opentelemetry-sdk
 orjson==3.13.0
     # via
     #   -c requirements.txt
@@ -251,7 +277,9 @@ prometheus-client==0.26.0
 protobuf==7.36.2
     # via
     #   -c requirements.txt
+    #   googleapis-common-protos
     #   onnxruntime
+    #   opentelemetry-proto
 psycopg2-binary==2.9.13
     # via
     #   -c requirements.txt
@@ -329,6 +357,8 @@ requests==2.34.2
     #   fastembed
     #   huggingface-hub
     #   langsmith
+    #   opentelemetry-exporter-http-transport
+    #   opentelemetry-exporter-otlp-proto-http
     #   requests-toolbelt
     #   tiktoken
 requests-toolbelt==1.0.0
@@ -380,6 +410,9 @@ typing-extensions==4.16.0
     #   langsmith
     #   openai
     #   opentelemetry-api
+    #   opentelemetry-exporter-otlp-proto-http
+    #   opentelemetry-sdk
+    #   opentelemetry-semantic-conventions
     #   pydantic
     #   pydantic-core
     #   python-docx

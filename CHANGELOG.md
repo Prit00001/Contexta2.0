@@ -2,6 +2,15 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Tracing (P2-15) (2026-10-19)
+
+### Added
+- OpenTelemetry tracing, off by default (`TRACING_ENABLED`, `core/tracing.py`): a `workflow.<stage>` span per research-graph node and an `llm.call` span per provider call, nested under FastAPI's server span (tagged with the request ID). Export over OTLP/HTTP with the standard `OTEL_*` variables; the SDK is optional (`requirements-otel.txt`, Docker `--build-arg WITH_OTEL=true`). No question, answer, source text or credentials in spans.
+- `opentelemetry-api` is now a direct dependency (it was already installed via langsmith; the runtime lock only changes in comments).
+
+### Changed
+- Backlog: P2-11 (shared Redis cache and limiter) and P2-15 marked done.
+
 ## [Unreleased] — Node-by-node workflow check (2026-10-19)
 
 ### Added

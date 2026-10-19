@@ -67,8 +67,11 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `LOG_FORMAT` | `text` | `json`: one object per line (Docker image default) |
 | `METRICS_ENABLED` | `true` | `GET /metrics` (Prometheus). Counters/histograms by endpoint, outcome, stage, provider; no user content |
+| `TRACING_ENABLED` | `false` | OpenTelemetry traces over OTLP/HTTP: one span per request, workflow stage and LLM call. Needs `requirements-otel.txt` (Docker: `--build-arg WITH_OTEL=true`); without it a warning is logged and tracing stays off. Configure the destination with the standard `OTEL_*` variables, e.g. `OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318`, `OTEL_TRACES_SAMPLER=parentbased_traceidratio`, `OTEL_TRACES_SAMPLER_ARG=0.1` |
 
 Logged per request: `request_id`, method, path, status, `duration_ms`, failure `category`. Per workflow stage: `stage`, `status`, `duration_ms`. Per answer: `outcome`, number of sources, provider, `question_len`, `question_sha8`. Never logged: question text, API keys, DSNs (a redaction filter is a backstop). LangSmith tracing is not enabled by the app; it would only activate if `LANGSMITH_TRACING`/`LANGCHAIN_TRACING_V2` were set, which sends prompts to LangSmith — leave unset unless intended.
+
+Traced (`TRACING_ENABLED=true`): FastAPI's own server span (method, route, `url.path`, status) tagged with `contexta.request_id`; under it `workflow.<stage>` spans (`contexta.stage`, `status`, `category`, `n_sources`) and `llm.call` spans (`contexta.provider`, `model`, `status`, `cooldown_s`; failures are error spans). The same rule as logs applies: no question, answer or source text and no credentials in any span (`tests/test_tracing.py`). `url.path` contains workspace IDs for `/workspaces/...` routes.
 
 ## Workspace platform (optional)
 

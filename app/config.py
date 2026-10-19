@@ -116,6 +116,7 @@ class Settings(BaseModel):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["text", "json"] = "text"
     metrics_enabled: bool = True
+    tracing_enabled: bool = False  # OpenTelemetry export (core.tracing); needs requirements-otel.txt
 
     # workspace platform (optional)
     database_url: str = Field("", repr=False)

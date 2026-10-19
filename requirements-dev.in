@@ -2,6 +2,7 @@
 #   uv pip compile requirements-dev.in --universal --python-version 3.11 -o requirements-dev.txt
 # The -c line keeps runtime versions identical to requirements.txt.
 -r requirements.in
+-r requirements-otel.in  # tracing tests use the SDK's in-memory exporter
 -c requirements.txt
 pytest>=8.0,<10.0
 ruff>=0.17,<0.18
