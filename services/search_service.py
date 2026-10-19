@@ -137,12 +137,10 @@ class SearchService:
     # ---- public API ----------------------------------------------------------
     @staticmethod
     def _ask_timings(t: dict, t0: float) -> dict:
-        return {
-            "local": t["retrieval"].get("local", 0),
-            "arxiv": t["retrieval"].get("arxiv", 0),
-            "generate": t["generate_ms"],
-            "total": round((time.perf_counter() - t0) * 1000),
-        }
+        out = {"local": t["retrieval"].get("local", 0), "arxiv": t["retrieval"].get("arxiv", 0)}
+        if "rerank" in t["retrieval"]:
+            out["rerank"] = t["retrieval"]["rerank"]
+        return out | {"generate": t["generate_ms"], "total": round((time.perf_counter() - t0) * 1000)}
 
     def _ask_key(self, question: str, top_k: int, use_arxiv: bool, history: list[dict]) -> tuple[str, bool, tuple]:
         question = " ".join(question.split())

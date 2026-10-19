@@ -33,7 +33,7 @@ FastAPI · LangGraph · LangChain · FAISS · fastembed (all-MiniLM-L6-v2, ONNX)
 | Metrics | `GET /metrics` (Prometheus): answers by outcome, latency, per-stage durations, LLM calls, 429s — no user content |
 | Workspace Q&A on the graph | `/workspaces/{id}/ask` returns the same `outcome` / `claims` / `citation_check` / `workflow` as `/ask` |
 | Fast offline start | Uncached model + no network: 46 s → ~5 s before falling back to hash embeddings |
-| Reranking | `RERANK_MODEL=Xenova/ms-marco-MiniLM-L-6-v2` (off by default): a small cross-encoder reorders the top 20 sources; measure with `eval/run_eval.py --rerank` |
+| Reranking | **On by default** (`RERANK_MODEL=Xenova/ms-marco-MiniLM-L-6-v2`, `none` to disable): a small cross-encoder reorders the top 20 sources — R@1 0.711 → 0.783, +0.4 s, 411 MB peak RAM |
 | Follow-up questions | Send `history` (last ≤3 turns) with `/ask` or `/ask/stream`; the follow-up is rewritten into a standalone question (`standalone_question`). Nothing is stored or logged server-side; the web page keeps turns in tab memory only |
 | Streaming answers | `POST /ask/stream` (server-sent events): sources first, then answer tokens as the model writes, then the full validated `/ask` response; the web page uses it |
 
@@ -221,7 +221,7 @@ Current: **241 passed** (Python 3.13, with Postgres 16 + pgvector and a local `r
 
 ## Roadmap
 
-- **Decisions waiting on the owner** — turn on reranking (+0.07 R@1 for +0.4 s), turn on `QUERY_REWRITE=decompose` (+0.05 R@1, one LLM call) or `selective` with `REWRITE_GAP_SCORE=0.45`, server-side conversation history for workspaces.
+- **Decided 2026-10-19** — reranking on by default; query rewriting stays off (on top of reranking, `decompose` adds only +0.03 R@1 for an LLM call per question; opt in with `QUERY_REWRITE=decompose` or `selective`). Still the owner's: server-side conversation history for workspaces.
 - **Phase 2, still open** — human review of the eval set and labelling `docs/evaluation/claims_to_label.csv` (measures the claim checker); later: React frontend: [PHASE_2_BACKLOG](docs/roadmap/PHASE_2_BACKLOG.md)
 - **Phase 3** — conditions 1–5 measured ([ADR-004 Results](docs/decisions/ADR-004-query-rewriting.md)): H1 half supported, H2–H4 not as stated; still open: H5 (local Ollama rewriter) and rerank + rewrite combined: [research brief](docs/research/PHASE_3_QUERY_REWRITING_RESEARCH.md)
 

@@ -21,9 +21,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr \
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-# Bake the embedding model into the image so cold starts don't download it (and so a missing
+# Bake the embedding model and the reranker (RERANK_MODEL default) into the image so cold starts don't download it (and so a missing
 # network at runtime can't silently drop retrieval to hash embeddings).
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/all-MiniLM-L6-v2', cache_dir='/app/.model_cache')"
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/all-MiniLM-L6-v2', cache_dir='/app/.model_cache')" \
+    && python -c "from fastembed.rerank.cross_encoder import TextCrossEncoder; TextCrossEncoder(model_name='Xenova/ms-marco-MiniLM-L-6-v2', cache_dir='/app/.model_cache')"
 
 COPY . .
 RUN useradd -m appuser && mkdir -p /app/.cache /app/.storage && chown -R appuser /app

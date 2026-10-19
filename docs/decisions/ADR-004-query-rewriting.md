@@ -87,6 +87,13 @@ unanswerable abstention):
   as the cheaper option. The rerank + rewrite combination on clean data has not been measured.
 - `REWRITE_GAP_SCORE` default stays 0.35 (owner decision); 0.45 is the measured suggestion.
 
+**Decision (2026-10-19, owner approved the recommendation).** Combined runs (cached rewrites, `hybrid_rerank`):
+rerank alone R@1 0.783 / R@5 0.991 / MRR 0.950; `decompose` + rerank 0.811 / 0.991 / 0.970; `single` +
+rerank 0.783 / 0.996 / 0.962; `multi` + rerank 0.797 / 0.973 / 0.961. With reranking on, rewriting adds
+at most +0.03 R@1 for one LLM call per question, so: **reranking on by default** (`RERANK_MODEL`),
+**`QUERY_REWRITE` stays `off`** (opt-in), and `REWRITE_GAP_SCORE` defaults to the measured 0.45 for anyone
+who enables `selective`.
+
 ## Consequences
 
 - Default behaviour, latency and cost are unchanged (`off`).

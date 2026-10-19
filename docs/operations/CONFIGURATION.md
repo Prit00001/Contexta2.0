@@ -22,7 +22,7 @@ A provider is *configured* when its key is set (for `custom`: when both `LLM_BAS
 | `LLM_MAX_ATTEMPTS` | `2` | no | Generation attempts per question in the workflow, 1–3 |
 | `QUERY_REWRITE` | `off` | Phase 3 experiment: `single` (retrieve with one rewrite), `multi` (3 rewrites + original, fused), `decompose` (sub-questions + original), `selective` (rewrite only when retrieval looks weak). One extra LLM call per uncached request; rewrites search the local library only. [ADR-004](../decisions/ADR-004-query-rewriting.md) |
 | `REWRITE_PROVIDERS` | – | Provider chain for rewriting only (e.g. `custom` for a local Ollama); default: `LLM_PROVIDERS` |
-| `REWRITE_GAP_SCORE` | `0.35` | `selective`: rewrite when the best retrieval score is below this. On MiniLM 0.35 fires on only 18% of questions; 0.45 (38%) captures more of the gain than rewriting every question with `multi` (ADR-004 Results) |
+| `REWRITE_GAP_SCORE` | `0.45` | `selective`: rewrite when the best retrieval score is below this. 0.45 measured on MiniLM: fires on 38% of questions and beats rewriting every question with `multi` (ADR-004 Results) |
 | `CLAIM_CHECK` | `off` | `llm`: after citation validation, check each cited claim against its cited text — verbatim quotes locally, the rest in one LLM-judge call through the provider chain. Adds `claims[].support` and claim counts to `citation_check`. Costs one extra LLM call per uncached answer; judge precision not yet measured |
 | `REQUIRE_LLM` | `false` | no | `true`: refuse to start with no configured provider |
 
@@ -36,7 +36,7 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 | `EMBED_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Must be a fastembed-supported model |
 | `FASTEMBED_CACHE_PATH` | fastembed default | Model cache directory (Docker: `/app/.model_cache`, baked in) |
 | `CACHE_DIR` | `.cache` (`/tmp/contexta-cache` on Vercel) | Library embedding cache (`embeddings.npz`) |
-| `RERANK_MODEL` | – | P2-07: cross-encoder reranking, e.g. `Xenova/ms-marco-MiniLM-L-6-v2` (~80 MB, downloaded at startup; not baked into the Docker image). Reorders sources that passed `MIN_SCORE`, never adds any. Unloadable → off, reported by `/ready` |
+| `RERANK_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` | Cross-encoder reranking (P2-07), **on by default** since measured: R@1 0.711 → 0.783, R@5 0.977 → 0.991 for +0.4 s per search and ~120 MB RAM (411 MB peak with both models). Reorders sources that passed `MIN_SCORE`, never adds any. Baked into the Docker image; unloadable → off, reported by `/ready`. `none` disables |
 | `RERANK_CANDIDATES` | `20` | How many retrieved sources the reranker scores before keeping `top_k` |
 | `MIN_SCORE` | per backend | Hybrid-score cut for library/arXiv sources, [-1, 1]. Unset: `0.225` on fastembed (MiniLM), `0.075` on hash embeddings (incl. the fallback) — calibrated with `eval/run_eval.py --sweep-min-score` |
 | `ARXIV_ENABLED` | `true` | Global switch; per request `use_arxiv` |

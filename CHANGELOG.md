@@ -2,6 +2,12 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Defaults from the measured runs (2026-10-19)
+
+### Changed
+- **Reranking on by default** (`RERANK_MODEL=Xenova/ms-marco-MiniLM-L-6-v2`; `none` disables): R@1 0.711 → 0.783, R@5 0.977 → 0.991, +0.4 s per search, 411 MB peak RAM. The model is baked into the Docker image.
+- `REWRITE_GAP_SCORE` default 0.35 → 0.45 (measured). `QUERY_REWRITE` stays `off`: on top of reranking it adds ≤ +0.03 R@1 for an LLM call per question.
+
 ## [Unreleased] — Real-LLM evaluation (2026-10-18)
 
 ### Fixed

@@ -51,7 +51,7 @@ def servers(tmp_path_factory):
     }
     env.update(
         NO_PROXY="127.0.0.1,localhost", no_proxy="127.0.0.1,localhost",
-        EMBED_BACKEND="hash", ARXIV_ENABLED="false", MIN_SCORE="0.0", LOG_FORMAT="json",
+        EMBED_BACKEND="hash", ARXIV_ENABLED="false", MIN_SCORE="0.0", LOG_FORMAT="json", RERANK_MODEL="none",
         CACHE_DIR=str(tmp_path_factory.mktemp("cache")), REQUIRE_LLM="true",
         LLM_PROVIDERS="custom", LLM_BASE_URL=f"http://127.0.0.1:{llm_port}/v1", LLM_MODEL="fake-llm",
     )  # fmt: skip

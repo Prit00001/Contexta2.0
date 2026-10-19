@@ -105,7 +105,7 @@ def ndcg_at_k(ranked_ids: list[str], gold: set[str], k: int) -> float:
     return dcg / idcg if idcg > 0 else 0.0
 
 
-DEFAULT_RERANK_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"
+DEFAULT_RERANK_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"  # also Settings.rerank_model's default
 
 
 async def run_retrieval(

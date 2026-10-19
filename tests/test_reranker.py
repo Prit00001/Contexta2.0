@@ -82,3 +82,15 @@ def test_unloadable_model_disables_reranking_and_ready_says_so(monkeypatch, tmp_
     finally:
         get_settings.cache_clear()
     assert body["checks"]["reranker"]["ok"] is False and "failed to load" in body["checks"]["reranker"]["detail"]
+
+
+def test_ask_reports_rerank_time(monkeypatch):
+    monkeypatch.setenv("RERANK_MODEL", "none")
+    get_settings.cache_clear()
+    try:
+        with TestClient(create_app()) as c:
+            c.app.state.service.research_retriever.reranker = Reranker("fake", model=FakeCrossEncoder())
+            d = c.post("/ask", json={"question": Q, "use_arxiv": False}).json()
+    finally:
+        get_settings.cache_clear()
+    assert "rerank" in d["timings_ms"] and "LoRA" in d["sources"][0]["snippet"] + d["sources"][0]["title"]

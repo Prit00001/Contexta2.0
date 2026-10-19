@@ -64,7 +64,9 @@ class Settings(BaseModel):
     cache_dir: Path = Path(".cache")
     model_cache_dir: Optional[str] = None
     min_score: Optional[float] = Field(None, ge=-1.0, le=1.0)  # None -> DEFAULT_MIN_SCORE[backend]
-    rerank_model: str = ""  # P2-07: e.g. Xenova/ms-marco-MiniLM-L-6-v2 (~80 MB); empty = no reranking
+    # P2-07, on by default since the measured run (EVALUATION_REPORT 5d.2/5f): R@1 0.711 -> 0.783 for
+    # +0.4 s and +~120 MB peak RAM (411 MB measured with both models). RERANK_MODEL=none turns it off.
+    rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
     rerank_candidates: int = Field(20, ge=2, le=100)
     hybrid_bm25_enabled: bool = False  # P2-FR-03: off by default - see EVALUATION_REPORT.md for why
     # the measured improvement doesn't yet justify flipping the real default (it only covers
@@ -82,7 +84,8 @@ class Settings(BaseModel):
     # Phase 3 query rewriting (core.query_rewrite); off = the measured baseline
     query_rewrite: Literal["off", "single", "multi", "decompose", "selective"] = "off"
     rewrite_providers: tuple[ProviderSpec, ...] = ()  # empty: rewrite with the main provider chain
-    rewrite_gap_score: float = Field(0.35, ge=-1.0, le=1.0)  # selective: rewrite when top score is below this
+    # selective: rewrite when the top score is below this; 0.45 measured on MiniLM (ADR-004 Results)
+    rewrite_gap_score: float = Field(0.45, ge=-1.0, le=1.0)
 
     # arXiv
     arxiv_enabled: bool = True
@@ -208,6 +211,8 @@ def load_settings() -> Settings:
         raw["cache_dir"] = "/tmp/contexta-cache"  # Vercel's filesystem is read-only except /tmp
     if "log_level" in raw:
         raw["log_level"] = str(raw["log_level"]).upper()
+    if str(raw.get("rerank_model", "")).lower() in ("none", "off", "false", "0"):
+        raw["rerank_model"] = ""  # explicit opt-out of the default reranker
     if (origins := _csv(_env("ALLOWED_ORIGINS"))) is not None:
         raw["allowed_origins"] = origins
     order = _csv(_env("LLM_PROVIDERS")) or KNOWN_PROVIDERS
