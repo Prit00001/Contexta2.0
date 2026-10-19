@@ -68,6 +68,16 @@ class Settings(BaseModel):
     # +0.4 s and +~120 MB peak RAM (411 MB measured with both models). RERANK_MODEL=none turns it off.
     rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
     rerank_candidates: int = Field(20, ge=2, le=100)
+    # Measured on the arXiv-mixed default path (EVALUATION_REPORT 5g): scoring only the first 500 chars of a
+    # passage keeps R@1 and cuts rerank p95 ~1.24 s -> ~0.5 s (library passages are all shorter than 500).
+    rerank_max_chars: int = Field(500, ge=0, le=10000)
+    # Prior for the curated library over live arXiv results, added to a library source's ranking key only
+    # (MIN_SCORE still judges the raw score). Without it arXiv pushed the gold library paper out:
+    # R@1 0.711 -> 0.603 (plain) / 0.653 (reranked). RERANK_LIBRARY_BOOST (logit units) applies when the
+    # reranker is on: 3 -> R@1 0.765, R@5 0.953, arXiv still ~half the top 5. LIBRARY_BOOST applies only
+    # when it is off: 0.1 -> R@1 0.711, R@5 0.933, arXiv 41% of the top 5.
+    library_boost: float = Field(0.1, ge=0.0, le=1.0)
+    rerank_library_boost: float = Field(3.0, ge=0.0, le=20.0)
     hybrid_bm25_enabled: bool = False  # P2-FR-03: off by default - see EVALUATION_REPORT.md for why
     # the measured improvement doesn't yet justify flipping the real default (it only covers
     # local-only retrieval; arXiv-mixed retrieval, the actual default path, is structurally
@@ -106,6 +116,7 @@ class Settings(BaseModel):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["text", "json"] = "text"
     metrics_enabled: bool = True
+    tracing_enabled: bool = False  # OpenTelemetry export (core.tracing); needs requirements-otel.txt
 
     # workspace platform (optional)
     database_url: str = Field("", repr=False)
@@ -114,10 +125,15 @@ class Settings(BaseModel):
     storage_bucket: str = "documents"
     supabase_url: str = ""
     supabase_service_key: str = Field("", repr=False)
+    # Public client key (safe to expose - RLS and the API's own checks still apply): lets /workspace
+    # sign users in with email + password. Unset: the page asks for an access token instead.
+    supabase_anon_key: str = ""
     max_upload_mb: float = Field(20.0, gt=0, le=200)
     supabase_jwt_secret: str = Field("", repr=False)
     redis_url: str = Field("", repr=False)
     workspace_rate_limit_per_min: int = Field(60, ge=0)
+    # Stored workspace conversations (P2-14, ADR-006): deleted this many days after the last turn
+    history_retention_days: int = Field(30, ge=1, le=3650)
 
     def min_score_for(self, backend: str) -> float:
         """MIN_SCORE if set explicitly, else the calibrated default for the backend actually in use

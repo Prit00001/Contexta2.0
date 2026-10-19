@@ -35,6 +35,7 @@ FastAPI · LangGraph · LangChain · FAISS · fastembed (all-MiniLM-L6-v2, ONNX)
 | Fast offline start | Uncached model + no network: 46 s → ~5 s before falling back to hash embeddings |
 | Reranking | **On by default** (`RERANK_MODEL=Xenova/ms-marco-MiniLM-L-6-v2`, `none` to disable): a small cross-encoder reorders the top 20 sources — R@1 0.711 → 0.783, +0.4 s, 411 MB peak RAM |
 | Follow-up questions | Send `history` (last ≤3 turns) with `/ask` or `/ask/stream`; the follow-up is rewritten into a standalone question (`standalone_question`). Nothing is stored or logged server-side; the web page keeps turns in tab memory only |
+| Library + arXiv ranking | First measurement of the default path (library + live arXiv): arXiv was pushing out the library paper (R@1 0.711 → 0.603). A library prior and shorter rerank passages bring it to R@1 0.765 / R@5 0.944 with arXiv still ~half the sources, rerank ~0.5 s → [ADR-005](docs/decisions/ADR-005-library-prior.md) |
 | Streaming answers | `POST /ask/stream` (server-sent events): sources first, then answer tokens as the model writes, then the full validated `/ask` response; the web page uses it |
 
 ### Phase 3 (experimental, off by default)
@@ -42,7 +43,7 @@ FastAPI · LangGraph · LangChain · FAISS · fastembed (all-MiniLM-L6-v2, ONNX)
 | Feature | Notes |
 |---|---|
 | Query rewriting | `QUERY_REWRITE=single|multi|decompose|selective` — the research brief's conditions 1–5 as a `rewrite` node in the graph; one LLM call max, original query kept (except `single`), rewrites shown in `query_rewrites` and the UI. [ADR-004](docs/decisions/ADR-004-query-rewriting.md) |
-| Local rewriter | `REWRITE_PROVIDERS=custom` + `LLM_BASE_URL` → rewrite with a local Ollama model, answer with the hosted chain (condition 6) |
+| Local rewriter | `REWRITE_PROVIDERS=custom` + `LLM_BASE_URL` → rewrite with a local Ollama model, answer with the hosted chain (condition 6). Measured: qwen2.5:7b on CPU ≈ hosted quality, 4–10 s per rewrite; use a GPU or a hosted model |
 | Comparison harness | `PYTHONPATH=. python eval/run_eval.py --rewrite all` — measured with gpt-oss-120b: `decompose` R@1 0.711 → 0.765, R@5 0.977 → 0.992 for one LLM call; `single` best on paraphrase (R@1 0.72 → 0.82). Default stays `off` (owner decision). EVALUATION_REPORT §5f |
 
 Verified for real on 2026-10-18/19: Groq LLM answers, the MiniLM and reranker downloads, and the Docker image (built and run with no network). Live arXiv is still only tested through mocks. See [Known limitations](#known-limitations).
@@ -90,6 +91,25 @@ uvicorn app.main:app --reload
 
 Open http://localhost:8000 (UI) or http://localhost:8000/docs (interactive API docs). Stop with Ctrl+C.
 
+### Frontend (React + TypeScript, `frontend/`)
+
+The UI is a React app: **Papers** (`/`, streaming cited answers, PDF upload, follow-ups) and **Workspace**
+(`/workspace`: sign-in, workspaces, documents, a thread view with saved conversations at
+`/workspace/{id}/ask/{conversation}`, and admin screens for members and API keys).
+
+```bash
+cd frontend && corepack enable && pnpm install
+pnpm dev        # http://localhost:5173, proxies API calls to uvicorn on :8000 (hot reload)
+pnpm build      # writes frontend/dist; uvicorn then serves it at / and /workspace
+pnpm test       # vitest; pnpm typecheck for tsc
+```
+
+FastAPI serves `frontend/dist` when it exists (the Docker image builds it in a Node stage). Without a
+build it falls back to the original no-build pages in `app/static/`, so a Python-only setup still has
+a UI. Workspace sign-in uses email + password when `SUPABASE_URL` and `SUPABASE_ANON_KEY` are set;
+otherwise it asks for a pasted access token. Workspaces need `DATABASE_URL`, `SUPABASE_JWT_SECRET` and
+the worker (`python -m services.worker`) for ingestion.
+
 The first start downloads the embedding model (cached afterwards). Check `GET /ready`: if `embeddings` is not `ok`, the model couldn't be loaded and retrieval is running on low-quality hash vectors.
 
 ### Offline demo of the full LLM path (no API key)
@@ -101,6 +121,17 @@ LLM_PROVIDERS=custom LLM_BASE_URL=http://127.0.0.1:9009/v1 LLM_MODEL=fake-llm \
 ```
 
 The stub quotes the retrieved sources with citations — it exercises the real pipeline but is not a model.
+
+### Checking every workflow node live
+
+```bash
+GROQ_API_KEY=... PYTHONPATH=. python scripts/live_node_check.py
+```
+
+Drives each LangGraph node (validate_request, contextualize, rewrite in every mode, retrieve, generate,
+validate_answer, check_claims, fallback, insufficient_evidence, finalize) and `/ask/stream` through the real
+API with a real LLM and live arXiv, and prints the trace each request took (~20 LLM calls). Routes a live
+model can't be steered into on demand are pinned offline by `tests/test_graph_routes.py`.
 
 ### Using OpenRouter only (or a local Ollama)
 
@@ -159,7 +190,7 @@ Streaming: `POST /ask/stream` takes the same body and sends events `stage`, `sou
 curl -N http://localhost:8000/ask/stream -H 'content-type: application/json' -d '{"question": "What is LoRA?"}'
 ```
 
-Other endpoints: `POST /ask-pdf` (multipart `question`, `file`, `top_k`), `GET /health`, `GET /ready`, `GET /metrics` (Prometheus), and the workspace API under `/workspaces/...` (see `/docs`). Errors: 422 invalid input, 429 rate limited (`Retry-After`), 500 generic with `request_id`, 503 retrieval unavailable.
+Other endpoints: `POST /ask-pdf` (multipart `question`, `file`, `top_k`), `GET /health`, `GET /ready`, `GET /metrics` (Prometheus), and the workspace API under `/workspaces/...` (see `/docs`). Workspace users can keep conversations: `POST /workspaces/{id}/ask` with `"save": true` returns a `conversation_id` to continue with; `GET`/`DELETE /workspaces/{id}/conversations[/{cid}]` list, read and delete them. Threads are visible only to their author and deleted 30 days after the last turn ([ADR-006](docs/decisions/ADR-006-conversation-history.md)). Errors: 422 invalid input, 429 rate limited (`Retry-After`), 500 generic with `request_id`, 503 retrieval unavailable.
 
 ## Configuration
 
@@ -190,10 +221,11 @@ pytest -q                     # unit + integration + E2E; no network, no API key
 make test-db                  # also run Postgres/pgvector tests (needs `docker compose up -d db`)
 make eval                     # retrieval metrics, offline;  make eval-sweep: MIN_SCORE calibration curve
 ruff check . && ruff format --check .
+cd frontend && pnpm typecheck && pnpm test   # React app (vitest + Testing Library)
 python scripts/smoke_test.py --base-url http://127.0.0.1:8000   # against a running server
 ```
 
-Current: **241 passed** (Python 3.13, with Postgres 16 + pgvector and a local `redis-server`; without them the DB tests skip and the Redis tests skip). Phase 1 ended at 181. Details: [TEST_REPORT](docs/testing/TEST_REPORT.md) · [TEST_STRATEGY](docs/testing/TEST_STRATEGY.md).
+Current: **305 passed** (Python 3.13, with Postgres 16 + pgvector and a local `redis-server`; without them the DB and Redis tests skip) and **12** frontend tests (vitest). Phase 1 ended at 181. Details: [TEST_REPORT](docs/testing/TEST_REPORT.md) · [TEST_STRATEGY](docs/testing/TEST_STRATEGY.md).
 
 ## Troubleshooting
 
@@ -215,7 +247,7 @@ Current: **241 passed** (Python 3.13, with Postgres 16 + pgvector and a local `r
 - `MIN_SCORE` is calibrated on the LLM-drafted, unreviewed eval set; recheck after the human review.
 - The evaluation questions were LLM-drafted and are not yet human-reviewed; treat every quality number as provisional.
 - The library is 25 curated abstracts; arXiv search is keyword-based and best-effort.
-- Live arXiv has still only been exercised through mocks; providers and the model download were verified for real in Phase 2.
+- Live arXiv, providers and model downloads are verified for real; arXiv-path quality is measured against library-paper gold labels only (no arXiv-aware labels), so it favours finding the library paper.
 - Caches and the `/ask` rate limiter are per process unless `REDIS_URL` is set. The PDF-embedding cache is always per process.
 - `/ask` is intentionally unauthenticated (public demo), protected by rate limiting.
 
@@ -223,13 +255,14 @@ Current: **241 passed** (Python 3.13, with Postgres 16 + pgvector and a local `r
 
 - **Decided 2026-10-19** — reranking on by default; query rewriting stays off (on top of reranking, `decompose` adds only +0.03 R@1 for an LLM call per question; opt in with `QUERY_REWRITE=decompose` or `selective`). Still the owner's: server-side conversation history for workspaces.
 - **Phase 2, still open** — human review of the eval set and labelling `docs/evaluation/claims_to_label.csv` (measures the claim checker); later: React frontend: [PHASE_2_BACKLOG](docs/roadmap/PHASE_2_BACKLOG.md)
-- **Phase 3** — conditions 1–5 measured ([ADR-004 Results](docs/decisions/ADR-004-query-rewriting.md)): H1 half supported, H2–H4 not as stated; still open: H5 (local Ollama rewriter) and rerank + rewrite combined: [research brief](docs/research/PHASE_3_QUERY_REWRITING_RESEARCH.md)
+- **Phase 3 — done.** All six conditions measured ([ADR-004 Results](docs/decisions/ADR-004-query-rewriting.md)): rewriting stays off by default; local rewriting (Ollama qwen2.5:7b) is close in quality but ~10× slower on CPU (EVALUATION_REPORT §5h)
 
 ## Project layout
 
 ```
 app/        main.py (factory, lifespan) · routes.py · routes_workspace.py · routes_admin.py · deps.py
-            config.py (validated settings) · schemas.py · observability.py · static/index.html
+            config.py (validated settings) · schemas.py · observability.py · static/ (no-build fallback UI)
+frontend/   React + TypeScript app (Vite, pnpm): src/pages (Search, workspace/*) · src/components · src/api
 core/       llm.py · prompts.py · lc_retriever.py · sources.py · citations.py   ← LangChain adapters
             claim_support.py · query_rewrite.py · cache.py · metrics.py
             generator.py · retriever.py · vector_store.py · embeddings.py · text.py · pdf.py
@@ -238,7 +271,7 @@ services/   research_graph.py (LangGraph) · search_service.py · arxiv_client.p
             workspace_qa.py · retrieval.py · ingestion.py · worker.py
 data/       documents.py (paper library)
 eval/       run_eval.py · rewrite_eval.py · dataset/ (questions.jsonl, review sheet)
-scripts/    smoke_test.py · fake_llm_server.py · migrate.py
+scripts/    smoke_test.py · fake_llm_server.py · live_node_check.py · fetch_arxiv_snapshot.py · migrate.py
 tests/      unit · integration/ · e2e/
 docs/       requirements · architecture · decisions · implementation · testing · operations · research · roadmap
 ```

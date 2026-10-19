@@ -2,6 +2,63 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — React frontend (P2-12) (2026-10-19)
+
+### Added
+- `frontend/`: React 19 + TypeScript app (Vite 8, react-router 7, pnpm; no UI library). **Papers** (`/`): streaming cited answers, PDF upload, follow-ups, evidence flags. **Workspace** (`/workspace`): sign-in, workspace picker and creation, documents with live ingestion status, threads with saved conversations at their own URL (`/workspace/{id}/ask/{conversation}`), **Members** (add by email, change role, remove) and **API keys** (create, shown once with copy, revoke) for admins. Escaped by construction (React); an error boundary keeps a failing view from blanking the app.
+- FastAPI serves `frontend/dist` at `/` and `/workspace/*` when built, else the original static pages.
+- Dockerfile: Node build stage; CI: `frontend` job (typecheck, vitest, build) and the Docker smoke test checks the app is served.
+- `GET /workspaces/{id}/members` now includes each member's `email`.
+
+## [Unreleased] — Workspace UI (2026-10-19)
+
+### Added
+- `/workspace` page (`app/static/workspace.html`, no build step, same design tokens as the main page): sign in, pick or create a workspace, upload / delete documents with live ingestion status, ask questions with a sidebar of saved conversations (open, continue, delete; shows when a thread will be deleted). Role-aware: viewers can ask but not change documents. Linked from the main page footer.
+- `GET /workspaces` (the signed-in user's workspaces and roles) and `GET /auth/config` (public sign-in settings for the page).
+- `SUPABASE_ANON_KEY`: enables email + password sign-in on the page; without it the page accepts a pasted access token.
+
+## [Unreleased] — Stored workspace conversations (P2-14) (2026-10-19)
+
+### Added
+- Server-side conversation history for workspace Q&A ([ADR-006](docs/decisions/ADR-006-conversation-history.md)), on the design the owner approved: visible only to the author (not other members, not admins), deleted 30 days after the last turn, full source passages stored per turn.
+- `POST /workspaces/{id}/ask`: `save` starts a thread, `conversation_id` continues it (the server supplies the last 3 turns as history), `history` for stateless follow-ups as in `/ask`; responses carry `conversation_id` and `standalone_question`.
+- `GET /workspaces/{id}/conversations`, `GET` / `DELETE /workspaces/{id}/conversations/{cid}`.
+- Migration `0003_conversations.sql` (tables + author-only RLS), `HISTORY_RETENTION_DAYS` (default 30); expired threads are hidden on read and deleted hourly by the worker.
+
+## [Unreleased] — Tracing (P2-15) (2026-10-19)
+
+### Added
+- OpenTelemetry tracing, off by default (`TRACING_ENABLED`, `core/tracing.py`): a `workflow.<stage>` span per research-graph node and an `llm.call` span per provider call, nested under FastAPI's server span (tagged with the request ID). Export over OTLP/HTTP with the standard `OTEL_*` variables; the SDK is optional (`requirements-otel.txt`, Docker `--build-arg WITH_OTEL=true`). No question, answer, source text or credentials in spans.
+- `opentelemetry-api` is now a direct dependency (it was already installed via langsmith; the runtime lock only changes in comments).
+
+### Changed
+- Backlog: P2-11 (shared Redis cache and limiter) and P2-15 marked done.
+
+## [Unreleased] — Node-by-node workflow check (2026-10-19)
+
+### Added
+- `tests/test_graph_routes.py`: 18 routes through the research graph with the exact (node, status) trace each must produce, plus a check that every node is reached. Four statuses (`invalid`, `empty`, `no_llm`, `unusable`) were previously untested; it also pins that claim-checking an extractive fallback makes no LLM call.
+- `scripts/live_node_check.py`: drives every node and `/ask/stream` through the real API with a real LLM and live arXiv. 11/11 checks pass against Groq `gpt-oss-120b`.
+
+## [Unreleased] — Library prior: answer-level check (2026-10-19)
+
+### Added
+- `eval/boost_compare.py`: answers the questions whose sources change between two `RERANK_LIBRARY_BOOST` values and has a judge model pick the better answer blind. EVALUATION_REPORT §5i: boost 3 vs 0 is 4 better / 3 worse / 33 ties on 40 questions, so the default stays.
+
+## [Unreleased] — Phase 3 H5: local rewriter (2026-10-19)
+
+### Added
+- EVALUATION_REPORT §5h: Ollama qwen2.5:1.5b and qwen2.5:7b (CPU-only) vs hosted gpt-oss-120b as the query rewriter, all modes, plain and reranked retrieval. H5 partly supported; ADR-004 and the research brief updated. Phase 3 is complete.
+
+## [Unreleased] — Library + arXiv path (2026-10-19)
+
+### Added
+- `scripts/fetch_arxiv_snapshot.py` and `eval/dataset/arxiv_snapshot.jsonl` (143 questions, 1,716 live arXiv papers); `eval/run_eval.py --arxiv` replays it, so `/ask`'s default path is measured for the first time.
+- `RERANK_LIBRARY_BOOST` / `LIBRARY_BOOST` library prior and `RERANK_MAX_CHARS` ([ADR-005](docs/decisions/ADR-005-library-prior.md)).
+
+### Changed
+- Defaults `RERANK_LIBRARY_BOOST=3`, `LIBRARY_BOOST=0.1` (only without the reranker), `RERANK_MAX_CHARS=500`: default-path R@1 0.603 → 0.765, R@5 0.867 → 0.944; rerank p95 ~1.24 s → ~0.5 s.
+
 ## [Unreleased] — Defaults from the measured runs (2026-10-19)
 
 ### Changed

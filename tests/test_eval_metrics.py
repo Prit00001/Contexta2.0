@@ -1,5 +1,6 @@
 """Tests for eval/run_eval.py: pure-math scoring functions, plus the MIN_SCORE sweep on hash embeddings (offline)."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -182,3 +183,28 @@ def test_sample_spec_takes_first_n_per_type():
     qs = load_questions(sample="single_fact:2,unanswerable:3")
     assert [q["type"] for q in qs] == ["single_fact"] * 2 + ["unanswerable"] * 3
     assert qs[0]["id"] == load_questions()[0]["id"]
+
+
+def test_arxiv_snapshot_replay_maps_library_papers_to_gold(monkeypatch, tmp_path):
+    import asyncio
+
+    import run_eval
+
+    from services.arxiv_client import ArxivClient
+
+    assert run_eval.library_arxiv_ids()["arxiv:2106.09685"] == "doc_009"  # LoRA is in the library and on arXiv
+    q = {"id": "t1", "question": "How does LoRA reduce trainable parameters?", "type": "single_fact",
+         "gold_document_ids": ["doc_009"]}  # fmt: skip
+    lora_via_arxiv = {"id": "arxiv_2106.09685", "source": "arxiv", "title": "LoRA: Low-Rank Adaptation",
+                      "url": "https://arxiv.org/abs/2106.09685v2", "authors": [], "published": "2021-06-17",
+                      "text": "LoRA: Low-Rank Adaptation. LoRA freezes weights and trains low-rank matrices to reduce trainable parameters."}  # fmt: skip
+    other = {**lora_via_arxiv, "id": "arxiv_9999.00001", "url": "https://arxiv.org/abs/9999.00001",
+             "title": "Unrelated", "text": "Unrelated. Graph colouring heuristics."}  # fmt: skip
+    snap = tmp_path / "snap.jsonl"
+    snap.write_text(json.dumps({"question_id": "t1", "query": ArxivClient.build_query(q["question"]),
+                                "papers": [lora_via_arxiv, other]}) + "\n")  # fmt: skip
+    monkeypatch.setattr(run_eval, "ARXIV_SNAPSHOT", snap)
+    rows = asyncio.run(run_eval.run_retrieval([q], top_k=10, arxiv=True))
+    assert rows[0]["recall@5"] == 1.0 and "doc_009" in rows[0]["ranked"]
+    assert all(not d.startswith("arxiv:2106") for d in rows[0]["ranked"])  # mapped, not counted as arXiv-only
+    assert asyncio.run(run_eval.SnapshotArxiv(snap).search("question not in snapshot")) == []

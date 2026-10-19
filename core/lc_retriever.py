@@ -110,6 +110,11 @@ class ResearchRetriever(_AsyncOnlyRetriever):
     hybrid_bm25_enabled: bool = False  # P2-FR-03
     reranker: Any = None  # core.reranker.Reranker (P2-07); None = no reranking
     rerank_candidates: int = 20
+    # Ranking prior for the curated library over live arXiv (LIBRARY_BOOST / RERANK_LIBRARY_BOOST): added
+    # to a library source's ranking score only - MIN_SCORE still judges its raw score, and the reported
+    # `score` stays raw. EVALUATION_REPORT 5g.
+    library_boost: float = 0.0
+    rerank_library_boost: float = 0.0
 
     async def _arxiv_candidates(self, question: str, qvec: np.ndarray) -> list[tuple[dict, float]]:
         papers = await self.arxiv.search(question)
@@ -137,6 +142,10 @@ class ResearchRetriever(_AsyncOnlyRetriever):
                 warnings.append(ARXIV_UNAVAILABLE)
         t_arxiv = time.perf_counter()
         hybrid_ranked = [s for s in rank(candidates, question) if s["score"] >= self.min_score]
+        if self.library_boost and not reranking:  # with reranking on, the prior is applied after reranking
+            hybrid_ranked.sort(
+                key=lambda s: s["score"] + (self.library_boost if s["source"] == "local" else 0.0), reverse=True
+            )
         if self.hybrid_bm25_enabled and hybrid_ranked:
             # BM25 only *re-ranks* candidates that already passed the dense quality gate above -
             # it never admits a candidate the dense signal rejected (a weak keyword match like
@@ -152,7 +161,9 @@ class ResearchRetriever(_AsyncOnlyRetriever):
         if reranking and ordered:
             # Reorders only what already passed MIN_SCORE (core/reranker.py), never widens it.
             t_rerank = time.perf_counter()
-            ranked = await self.reranker.rerank(question, ordered[: self.rerank_candidates], top_k)
+            ranked = await self.reranker.rerank(
+                question, ordered[: self.rerank_candidates], top_k, library_boost=self.rerank_library_boost
+            )
             timings["rerank"] = round((time.perf_counter() - t_rerank) * 1000)
         else:
             ranked = ordered[:top_k]

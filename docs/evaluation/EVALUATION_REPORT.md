@@ -300,13 +300,149 @@ Reading:
   R@5 0.991, +0.4 s, no LLM call or quota) gets about the same gain as `decompose`; their
   combination on clean data was not measured.
 
+## 5g. The default path: library + live arXiv (2026-10-19)
+
+Until now every retrieval number was library-only (`use_arxiv=False`), but `/ask` mixes in live arXiv
+by default. With arXiv reachable, `scripts/fetch_arxiv_snapshot.py` froze the live results for all 143
+questions (1,716 papers, `eval/dataset/arxiv_snapshot.jsonl`) and `eval/run_eval.py --arxiv` replays
+them. A library paper returned through its arXiv copy still counts as gold; arXiv-only papers never do
+(the dataset has no arXiv gold), so some "misses" below may be relevant arXiv papers — but each
+question was written about a specific library paper, and losing it from the top results is a real
+regression.
+
+**Before** (MiniLM, overall, 110 answerable questions):
+
+| Path | R@1 | R@5 | MRR | arXiv-only share of top 5 | p95 retrieval |
+|---|---|---|---|---|---|
+| library only (all earlier sections) | 0.711 | 0.977 | 0.908 | 0 | 12 ms |
+| + arXiv, hybrid | 0.603 | 0.867 | 0.798 | 0.63 | 253 ms* |
+| + arXiv, reranked (default since 2026-10-19) | 0.653 | 0.876 | 0.823 | 0.65 | 1,356 ms |
+| + arXiv, BM25 fusion | 0.747 | 1.000 | 0.934 | **0.007** | 260 ms* |
+
+\* replayed snapshot: the live arXiv call (~1.6–2.4 s measured) is not included.
+
+BM25 fusion "wins" only by pushing arXiv out of the results entirely — the structural bias ADR-003
+predicted (BM25 indexes the library only), now measured; it stays off. Comparison questions suffered
+most: reranked R@5 0.984 → 0.729.
+
+**Library prior** (ADR-005): a boost added to library sources' *ranking* key only; `MIN_SCORE` still
+judges their raw score.
+
+| Prior | R@1 | R@5 | MRR | comparison R@5 | arXiv share |
+|---|---|---|---|---|---|
+| hybrid, `LIBRARY_BOOST` 0.05 / 0.1 / 0.2 | 0.670 / **0.711** / 0.711 | 0.897 / **0.933** / 0.959 | 0.862 / 0.901 / 0.904 | 0.896 / 0.927 / 0.953 | 0.52 / **0.41** / 0.21 |
+| reranked, `RERANK_LIBRARY_BOOST` 1 / 2 / **3** / 5 | 0.694 / 0.735 / **0.765** / 0.774 | 0.912 / 0.930 / **0.953** / 0.970 | 0.862 / 0.901 / **0.932** / 0.944 | 0.823 / 0.854 / **0.932** / 0.958 | 0.61 / 0.57 / **0.53** / 0.44 |
+
+**Rerank passage length** (`RERANK_LIBRARY_BOOST` 3): arXiv abstracts are ~4× longer than library
+entries, so reranking cost 1.0–1.6 s per question on this path.
+
+| `RERANK_MAX_CHARS` | R@1 | R@5 | MRR | p95 retrieval |
+|---|---|---|---|---|
+| whole passage | 0.765 | 0.953 | 0.932 | 1,242 ms |
+| 300 | 0.752 | 0.956 | 0.923 | 675 ms |
+| **500** | **0.765** | **0.944** | **0.934** | **493 ms** |
+| 800 | 0.761 | 0.953 | 0.925 | 624 ms |
+
+Library-only results are unchanged at 500 (all library passages are ≤ 402 characters): R@1 0.783,
+R@5 0.991. Latency figures are from a shared machine and noisy at ±150 ms.
+
+**New defaults:** `RERANK_LIBRARY_BOOST=3`, `RERANK_MAX_CHARS=500`, and `LIBRARY_BOOST=0.1` (used only
+when reranking is off). On the default path that is R@1 0.603 → **0.765**, R@5 0.867 → **0.944**, with
+arXiv still about half of the top 5. Live check (real arXiv + Groq): LoRA and DPR-vs-ColBERT questions
+put the library papers first with recent arXiv work after them; a topic the library doesn't cover
+(speculative decoding) is answered entirely from arXiv; reranking 130–200 ms, total 2.6–3.2 s
+(4.2–5.5 s before).
+
+## 5h. Phase 3 H5 — local rewriter (Ollama) vs hosted (2026-10-19)
+
+`REWRITE_PROVIDERS=custom` against Ollama 0.40.6 in Docker on this sandbox (4 CPU cores, 15.7 GiB RAM,
+**no GPU** — Ollama reported `inference compute: cpu`), `--rewrite all --retrievers hybrid,hybrid_rerank`,
+all 143 questions, library-only, MiniLM. Hosted reference: Groq `gpt-oss-120b` (§5f). "Fails" = the
+rewrite was unusable (invalid JSON, or only the original question echoed back) and retrieval fell back
+to the question.
+
+Overall R@1 (hybrid / hybrid + rerank; `off` = 0.711 / 0.783):
+
+| Rewriter | single | multi | decompose | selective* | fails (single / multi / decompose) | rewrite p50 / p95 |
+|---|---|---|---|---|---|---|
+| qwen2.5:1.5b (986 MB) | 0.715 / **0.802** | 0.720 / 0.779 | 0.697 / 0.742 | 0.720 / 0.779 | 17 / 0 / 14 of 143 | 1.0–2.8 s / ~4.0 s |
+| qwen2.5:7b (4.7 GB) | 0.711 / 0.747 | **0.747 / 0.802** | 0.742 / 0.756 | 0.752 / 0.779 | 4 / 0 / 1 | 3.9–6.4 s / 8.3–10.0 s |
+| gpt-oss-120b (Groq) | **0.779** / 0.783 | 0.747 / 0.797 | 0.765 / **0.811** | 0.720 / 0.783 | 0 / 0 / 0 | 0.5–0.6 s / 0.7–0.9 s |
+
+\* selective fired on 38% of questions for the local runs (`REWRITE_GAP_SCORE` 0.45) and 18% for the
+hosted run (0.35, before the default changed) — not directly comparable.
+
+Paraphrase R@1 (hybrid; `off` 0.718): 1.5b 0.692–0.744, 7b up to **0.821** (multi), 120b up to **0.821**
+(single, decompose). R@5 stayed within 0.96–0.99 for every model and mode.
+
+Reading:
+- **H5 is partly supported.** The 7B model's best mode (`multi`: R@1 0.747, paraphrase 0.821) is within
+  ~3 points of the hosted model's best on the plain retriever (`single` 0.779) and ties it with
+  reranking (0.802 vs 0.811). JSON was reliable (5 unusable of 429 calls). But on CPU it is **~10× slower**
+  (p50 6.4 s vs 0.6 s for `multi`), which rules it out for interactive use without a GPU.
+- **The 1.5B model does not help on its own.** Its rewrites are close to the question or echo it back
+  (31 unusable of 286 `single`/`decompose` calls), and `decompose` with it is *worse* than no rewriting
+  (R@1 0.697). Its odd `single` + rerank result (0.802) is a single configuration on an unreviewed set.
+- **Memory:** the Ollama container held ~6.6 GiB with the 1.5B model loaded and ~10 GiB with the 7B
+  (resident 5.2 GB), against the 512 MB tier the hosted deployment targets. Local rewriting is a
+  self-hosting option only, as the brief anticipated (§4).
+- **Recommendation:** keep rewriting off by default (§5f/ADR-004). Anyone who enables it should use a
+  hosted model, or a local ≥7B model on a GPU; a CPU-only 7B adds 4–10 s per question.
+
+## 5i. Does the library prior cost answer quality? (2026-10-19)
+
+§5g chose `RERANK_LIBRARY_BOOST=3` on retrieval metrics whose gold labels are all library papers, so
+it could not say whether the arXiv papers the prior pushes down would have produced better answers.
+`eval/boost_compare.py` measures that at the answer level on the default path (arXiv snapshot
+replayed, reranker on, MiniLM, `MIN_SCORE` 0.225):
+
+1. Retrieve every question with boost 0 and boost 3. **81 of 143** get a different top 5 (24 of them
+   the same five sources in another order); the other 62 would give identical prompts.
+2. Answer a random 40 of those 81 under both settings with Groq `gpt-oss-120b` (80 answer calls).
+3. A judge (`gpt-oss-20b`, a different model) sees the question and both answers, each with the
+   source texts it cites, in random order, and picks the better one: grounding first, then whether it
+   answers the question, then completeness; told not to favour length or source type.
+
+0 questions were still rate-limited at the end; 0 judge outputs were unusable.
+
+| Type | n | boost 3 better | boost 0 better | tie |
+|---|---|---|---|---|
+| paraphrase | 18 | 3 | 1 | 14 |
+| comparison | 10 | 1 | 1 | 8 |
+| unanswerable | 7 | 0 | 1 | 6 |
+| single_fact | 5 | 0 | 0 | 5 |
+| **all** | **40** | **4** | **3** | **33** |
+
+| | boost 0 | boost 3 |
+|---|---|---|
+| arXiv share of the sources the answer saw | 0.60 | 0.43 |
+| arXiv share of the sources the answer cited | 0.19 | 0.14 |
+| `insufficient_evidence` outcomes (of 40) | 5 | 4 |
+
+Reading:
+- **No measurable difference in answer quality.** 33 of 40 pairs are ties, and 4 against 3 is well
+  within noise for n = 40. The prior changes what the model *sees* (arXiv share of sources 60% → 43%)
+  much more than what it *cites* (19% → 14%): with or without the boost, the answer model mostly cites
+  the library paper when one is in the top 5.
+- The decisive pairs go both ways for ordinary reasons: q084 (DPR vs Sentence-BERT) abstained at
+  boost 0 because the second library paper had been pushed out, and was answered at boost 3; q055 lost
+  at boost 3 because the boost 0 sources happened to cover more of a broad question.
+- The "unanswerable" questions are unanswerable *from the library*. Of the 7 here, 4 abstained under
+  both settings and 2 were answered from arXiv under both, which is what the arXiv path is for. One
+  (q135) was answered from library passages under both settings; the boost did not cause that.
+- **Decision unchanged:** keep `RERANK_LIBRARY_BOOST=3`. It recovers the retrieval metrics of §5g
+  (R@1 0.653 → 0.765) and, on this evidence, does not make answers worse.
+- Limits: one judge model, n = 40, an LLM-drafted unreviewed question set. The judge picked position B
+  in 5 of 7 decisive pairs: a slight position bias, which the random order spreads evenly across both
+  settings. This is not a substitute for arXiv-aware gold labels.
+
 ## 6. Known limitations of this dataset
 
 - Unreviewed (see §1) — treat as provisional.
 - Same model drafted the questions and knows the corpus — risk of unconsciously phrasing questions
   that are easier for retrieval than a real user's question would be, despite the explicit
   instruction to use different vocabulary for `paraphrase` items.
-- No arXiv-sourced questions (snapshot not fetched — B-2 blocked everywhere tried so far).
+- No arXiv-only gold labels: the arXiv snapshot (§5g) exists, but every question targets a library paper.
 - 25-document corpus is small; retrieval metrics on a corpus this size don't necessarily predict
   behavior at realistic scale (this is also why Qdrant/chunking, P2-08/09, stay deferred — there's
   nothing here yet that would show a difference).

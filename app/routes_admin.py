@@ -13,9 +13,11 @@ from app.schemas import (
     ApiKeyCreateRequest,
     ApiKeyCreateResponse,
     ApiKeyOut,
+    AuthConfig,
     CreateWorkspaceRequest,
     CreateWorkspaceResponse,
     MemberOut,
+    WorkspaceOut,
 )
 from core import auth, db
 
@@ -27,6 +29,34 @@ def _pool(request: Request):
     if pool is None:
         raise HTTPException(503, "Database is not configured (DATABASE_URL not set).")
     return pool
+
+
+@router.get("/auth/config", response_model=AuthConfig)
+async def auth_config(request: Request):
+    """Public sign-in settings for the /workspace page (no secrets: the anon key is a public client key)."""
+    s = request.app.state.settings
+    sign_in = bool(s.supabase_url and s.supabase_anon_key)
+    return AuthConfig(
+        workspaces_enabled=request.app.state.db_pool is not None,
+        supabase_url=s.supabase_url if sign_in else None,
+        supabase_anon_key=s.supabase_anon_key if sign_in else None,
+        history_retention_days=s.history_retention_days,
+    )
+
+
+@router.get("/workspaces", response_model=list[WorkspaceOut])
+async def list_my_workspaces(request: Request, user_id: str = Depends(require_user)):
+    pool = _pool(request)
+
+    def _list():
+        conn = db.get_pool_conn(pool)
+        try:
+            return db.user_workspaces(conn, user_id)
+        finally:
+            db.put_pool_conn(pool, conn)
+
+    rows = await asyncio.to_thread(_list)
+    return [WorkspaceOut(workspace_id=str(r[0]), name=r[1], role=r[2], org_id=str(r[3])) for r in rows]
 
 
 @router.post("/workspaces", response_model=CreateWorkspaceResponse)
@@ -85,7 +115,7 @@ async def list_members(workspace_id: str, request: Request, ctx=Depends(require_
             db.put_pool_conn(pool, conn)
 
     rows = await asyncio.to_thread(_list)
-    return [MemberOut(user_id=str(r[0]), role=r[1], created_at=r[2].isoformat()) for r in rows]
+    return [MemberOut(user_id=str(r[0]), role=r[1], created_at=r[2].isoformat(), email=r[3]) for r in rows]
 
 
 @router.delete("/workspaces/{workspace_id}/members/{user_id}", status_code=204)

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from typing import Literal, Optional
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 ASK_REQUEST_EXAMPLE = {
     "question": "How does retrieval-augmented generation reduce hallucination?",
@@ -214,6 +215,30 @@ class Citation(BaseModel):
 class WorkspaceAskRequest(BaseModel):
     question: str = Field(..., min_length=3, max_length=500)
     top_k: int = Field(5, ge=1, le=10)
+    history: list[Turn] = Field(
+        [],
+        max_length=3,
+        description="Stateless follow-up context, as in /ask. Not allowed together with `conversation_id`, "
+        "whose stored turns are used instead.",
+    )
+    conversation_id: Optional[UUID] = Field(
+        None,
+        description="Continue a stored conversation (P2-14): its last turns are the follow-up context and this "
+        "turn is appended. Only the user who started it can use it.",
+    )
+    save: bool = Field(
+        False,
+        description="Start a stored conversation with this turn; the response's `conversation_id` continues it. "
+        "Needs a signed-in user (not an API key). Kept for HISTORY_RETENTION_DAYS after the last turn.",
+    )
+
+    @model_validator(mode="after")
+    def _one_kind_of_history(self):
+        if self.conversation_id and self.history:
+            raise ValueError("send either `conversation_id` or `history`, not both")
+        if self.conversation_id and self.save:
+            raise ValueError("`save` starts a new conversation; omit it when sending `conversation_id`")
+        return self
 
 
 class WorkspaceAskResponse(BaseModel):
@@ -236,6 +261,48 @@ class WorkspaceAskResponse(BaseModel):
     standalone_question: Optional[str] = Field(
         None, description="With `history`: the follow-up rewritten as a standalone question (what was searched)"
     )
+    conversation_id: Optional[str] = Field(None, description="The stored conversation this turn was saved to")
+
+
+# ---- Stored conversations (P2-14, ADR-006) ----
+
+
+class ConversationOut(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    turns: int
+
+
+class StoredSource(BaseModel):
+    document_id: str
+    filename: str
+    page_number: Optional[int] = None
+    section_heading: Optional[str] = None
+    text: str = Field(..., description="The full passage the answer was generated from, as it was at the time")
+    score: float
+
+
+class ConversationTurnOut(BaseModel):
+    position: int
+    question: str
+    standalone_question: Optional[str] = None
+    answer: str
+    outcome: str
+    sources: list[StoredSource] = []
+    citations: list[CitationOut] = []
+    claims: list[ClaimOut] = []
+    created_at: str
+
+
+class ConversationDetail(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    expires_at: str = Field(..., description="When this conversation is deleted unless another turn is added")
+    turns: list[ConversationTurnOut] = []
 
 
 # ---- Workspace bootstrap, membership, API keys (Phase 1d) ----
@@ -256,10 +323,27 @@ class AddMemberRequest(BaseModel):
     role: str = Field("member", pattern="^(admin|member|viewer)$")
 
 
+class WorkspaceOut(BaseModel):
+    workspace_id: str
+    name: str
+    role: str
+    org_id: str
+
+
+class AuthConfig(BaseModel):
+    """What the /workspace page needs to sign users in. Only public values."""
+
+    workspaces_enabled: bool
+    supabase_url: Optional[str] = None
+    supabase_anon_key: Optional[str] = None
+    history_retention_days: int
+
+
 class MemberOut(BaseModel):
     user_id: str
     role: str
     created_at: str
+    email: Optional[str] = None
 
 
 class ApiKeyCreateRequest(BaseModel):

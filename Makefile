@@ -36,6 +36,7 @@ eval:             ## retrieval-only eval metrics, offline (add --with-llm yourse
 
 lock:             ## re-pin dependencies after editing requirements*.in
 	uv pip compile requirements.in --universal --python-version 3.11 -o requirements.txt
+	uv pip compile requirements-otel.in --universal --python-version 3.11 -o requirements-otel.txt
 	uv pip compile requirements-dev.in --universal --python-version 3.11 -o requirements-dev.txt
 
 eval-sweep:       ## MIN_SCORE calibration curve for the configured embedding backend, offline

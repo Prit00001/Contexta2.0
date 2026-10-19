@@ -85,7 +85,8 @@ answers). A two-instance test proves the cache/limiter is actually shared.
 - **P2-08/P2-09 (chunking, Qdrant):** the 25-document corpus doesn't approach FAISS `IndexFlatIP`'s
   limits. Stays an eval-only exercise per the backlog's own acceptance criterion; no adoption without
   a corpus-size trigger.
-- **P2-14 (conversation history):** needs a concrete use case and a privacy/storage design the user
+- **P2-14 (conversation history):** design approved by the owner on 2026-10-19 and implemented
+  (ADR-006). Originally: needs a concrete use case and a privacy/storage design the user
   approves — an explicitly blocking decision per the master brief (§9), not one to default silently.
 
 ## 3. Non-functional requirements

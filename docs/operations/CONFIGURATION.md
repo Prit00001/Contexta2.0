@@ -38,6 +38,9 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 | `CACHE_DIR` | `.cache` (`/tmp/contexta-cache` on Vercel) | Library embedding cache (`embeddings.npz`) |
 | `RERANK_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` | Cross-encoder reranking (P2-07), **on by default** since measured: R@1 0.711 → 0.783, R@5 0.977 → 0.991 for +0.4 s per search and ~120 MB RAM (411 MB peak with both models). Reorders sources that passed `MIN_SCORE`, never adds any. Baked into the Docker image; unloadable → off, reported by `/ready`. `none` disables |
 | `RERANK_CANDIDATES` | `20` | How many retrieved sources the reranker scores before keeping `top_k` |
+| `RERANK_MAX_CHARS` | `500` | Score only the first N characters of each passage when reranking (0 = whole text). Keeps quality, ~2.5× faster on the arXiv path (EVALUATION_REPORT §5g) |
+| `RERANK_LIBRARY_BOOST` | `3` | With reranking on: bonus (cross-encoder logit units) for curated-library sources over live arXiv in the final order. 0 = none; 5 = more library, less arXiv ([ADR-005](../decisions/ADR-005-library-prior.md)) |
+| `LIBRARY_BOOST` | `0.1` | Same prior on the hybrid score, used only when reranking is off. Never lets a source past `MIN_SCORE` |
 | `MIN_SCORE` | per backend | Hybrid-score cut for library/arXiv sources, [-1, 1]. Unset: `0.225` on fastembed (MiniLM), `0.075` on hash embeddings (incl. the fallback) — calibrated with `eval/run_eval.py --sweep-min-score` |
 | `ARXIV_ENABLED` | `true` | Global switch; per request `use_arxiv` |
 | `ARXIV_MAX_RESULTS` | `12` | 1–50 |
@@ -64,8 +67,11 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `LOG_FORMAT` | `text` | `json`: one object per line (Docker image default) |
 | `METRICS_ENABLED` | `true` | `GET /metrics` (Prometheus). Counters/histograms by endpoint, outcome, stage, provider; no user content |
+| `TRACING_ENABLED` | `false` | OpenTelemetry traces over OTLP/HTTP: one span per request, workflow stage and LLM call. Needs `requirements-otel.txt` (Docker: `--build-arg WITH_OTEL=true`); without it a warning is logged and tracing stays off. Configure the destination with the standard `OTEL_*` variables, e.g. `OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318`, `OTEL_TRACES_SAMPLER=parentbased_traceidratio`, `OTEL_TRACES_SAMPLER_ARG=0.1` |
 
 Logged per request: `request_id`, method, path, status, `duration_ms`, failure `category`. Per workflow stage: `stage`, `status`, `duration_ms`. Per answer: `outcome`, number of sources, provider, `question_len`, `question_sha8`. Never logged: question text, API keys, DSNs (a redaction filter is a backstop). LangSmith tracing is not enabled by the app; it would only activate if `LANGSMITH_TRACING`/`LANGCHAIN_TRACING_V2` were set, which sends prompts to LangSmith — leave unset unless intended.
+
+Traced (`TRACING_ENABLED=true`): FastAPI's own server span (method, route, `url.path`, status) tagged with `contexta.request_id`; under it `workflow.<stage>` spans (`contexta.stage`, `status`, `category`, `n_sources`) and `llm.call` spans (`contexta.provider`, `model`, `status`, `cooldown_s`; failures are error spans). The same rule as logs applies: no question, answer or source text and no credentials in any span (`tests/test_tracing.py`). `url.path` contains workspace IDs for `/workspaces/...` routes.
 
 ## Workspace platform (optional)
 
@@ -74,12 +80,14 @@ Logged per request: `request_id`, method, path, status, `duration_ms`, failure `
 | `DATABASE_URL` | – | Postgres with pgvector. Unset → workspace routes return 503. Unreachable at startup → public API still starts, `/ready` shows `database: unreachable` |
 | `SUPABASE_JWT_SECRET` | – | Required for workspace auth; unset → workspace JWT routes return 503 |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | – | Member lookup; Supabase storage |
+| `SUPABASE_ANON_KEY` | – | Supabase's public client key. With `SUPABASE_URL`, the `/workspace` page signs users in with email + password; without it, the page asks for a pasted access token (local/dev). Served by `GET /auth/config` (public by design; the service key and JWT secret never are) |
 | `STORAGE_BACKEND` | `local` | `local` or `supabase` (requires the two above) |
 | `STORAGE_DIR` | `.storage` | Local backend root |
 | `STORAGE_BUCKET` | `documents` | Supabase bucket |
 | `MAX_UPLOAD_MB` | `20` | Workspace uploads |
 | `REDIS_URL` | – | Shared answer cache, `/ask` and workspace rate limits across instances; falls back to in-memory if unset or unreachable |
 | `WORKSPACE_RATE_LIMIT_PER_MIN` | `60` | |
+| `HISTORY_RETENTION_DAYS` | `30` | Stored workspace conversations ([ADR-006](../decisions/ADR-006-conversation-history.md)) are hidden once idle this long and deleted by the worker (`python -m services.worker`, hourly). Only their author can see them; each turn keeps the full source passages, which therefore outlive a deleted document until the thread expires. Apply migration `0003_conversations.sql` (`python scripts/migrate.py`) before upgrading |
 
 ## Safe local setup
 

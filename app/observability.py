@@ -19,9 +19,14 @@ import logging
 import re
 import time
 import uuid
+from contextlib import nullcontext
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from core import tracing
 
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
 
@@ -103,6 +108,14 @@ def configure_logging(level: str = "INFO", fmt: str = "text") -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
+def _status_category(code: int) -> str | None:
+    if code == 429:
+        return "rate_limited"
+    if code == 422:
+        return "validation"
+    return "internal" if code >= 500 else None
+
+
 class RequestContextMiddleware:
     """Assigns/propagates X-Request-ID, times the request, logs one ``http.request`` event."""
 
@@ -127,29 +140,38 @@ class RequestContextMiddleware:
                 message["headers"] = [*message["headers"], (b"x-request-id", rid.encode())]
             await send(message)
 
-        try:
-            await self.app(scope, receive, send_wrapper)
-        except Exception as exc:  # SR-41/SR-42: generic body + request ID; details only in redacted logs
-            logging.getLogger("contexta.error").error(
-                "unhandled exception", exc_info=exc,
-                extra={"event": "http.error", "category": "internal", "error_type": type(exc).__name__},
-            )  # fmt: skip
-            if status["started"]:
-                raise
-            response = JSONResponse({"detail": "Internal server error", "request_id": rid}, status_code=500)
-            await response(scope, receive, send_wrapper)
-        finally:
-            code = status["code"]
-            category = (
-                "rate_limited" if code == 429 else "validation" if code == 422 else "internal" if code >= 500 else None
-            )
-            log.info(
-                "%s %s %s",
-                scope.get("method"),
-                scope.get("path"),
-                code,
-                extra={"event": "http.request", "method": scope.get("method"), "path": scope.get("path"),
-                       "status_code": code, "duration_ms": round((time.perf_counter() - t0) * 1000),
-                       "category": category},
-            )  # fmt: skip
-            request_id_var.reset(token)
+        # P2-15: FastAPI opens the server span itself (method, route, status); tag it with the request ID
+        # so traces and logs join up. Workflow and LLM spans nest under it. Without one, open our own.
+        current = trace.get_current_span()
+        own = None if current.is_recording() else tracing.span("http.request", method=scope.get("method"))
+        with own or nullcontext(current) as span:
+            tracing.set_attributes(span, request_id=rid)
+            try:
+                await self.app(scope, receive, send_wrapper)
+            except Exception as exc:  # SR-41/SR-42: generic body + request ID; details only in redacted logs
+                logging.getLogger("contexta.error").error(
+                    "unhandled exception", exc_info=exc,
+                    extra={"event": "http.error", "category": "internal", "error_type": type(exc).__name__},
+                )  # fmt: skip
+                if status["started"]:
+                    raise
+                response = JSONResponse({"detail": "Internal server error", "request_id": rid}, status_code=500)
+                await response(scope, receive, send_wrapper)
+            finally:
+                code = status["code"]
+                category = _status_category(code)
+                log.info(
+                    "%s %s %s",
+                    scope.get("method"),
+                    scope.get("path"),
+                    code,
+                    extra={"event": "http.request", "method": scope.get("method"), "path": scope.get("path"),
+                           "status_code": code, "duration_ms": round((time.perf_counter() - t0) * 1000),
+                           "category": category},
+                )  # fmt: skip
+                # for our own span only: FastAPI's has ended by now, and records route and status itself
+                route = getattr(scope.get("route"), "path", None)  # the template, never ids from the path
+                tracing.set_attributes(span, route=route, status_code=code, category=category)
+                if code >= 500:
+                    span.set_status(Status(StatusCode.ERROR))
+                request_id_var.reset(token)

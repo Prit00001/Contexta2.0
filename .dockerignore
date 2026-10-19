@@ -15,3 +15,6 @@ eval/*.json
 eval/*.csv
 eval/report.md
 eval/rewrite_report.md
+# frontend: dependencies and build output come from the Dockerfile's node stage
+frontend/node_modules
+frontend/dist

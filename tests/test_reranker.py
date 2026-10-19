@@ -34,7 +34,8 @@ def _retriever(tmp_path, **kw):
     embedder = Embedder("hash", "test")
     library = Retriever(embedder, tmp_path / "emb.npz")
     library.build(DOCUMENTS)
-    return ResearchRetriever(embedder=embedder, library=library, arxiv=None, **kw)
+    kw.setdefault("arxiv", None)
+    return ResearchRetriever(embedder=embedder, library=library, **kw)
 
 
 def test_reranker_reorders_candidates_and_keeps_retrieval_score(tmp_path):
@@ -94,3 +95,43 @@ def test_ask_reports_rerank_time(monkeypatch):
     finally:
         get_settings.cache_clear()
     assert "rerank" in d["timings_ms"] and "LoRA" in d["sources"][0]["snippet"] + d["sources"][0]["title"]
+
+
+class RecordingCrossEncoder:
+    def __init__(self, scores):
+        self.scores, self.texts = scores, []
+
+    def rerank(self, query, documents):
+        self.texts = list(documents)
+        return self.scores[: len(self.texts)]
+
+
+def test_rerank_library_boost_and_max_chars():
+    srcs = [
+        {"id": "a", "source": "arxiv", "text": "x" * 1000},
+        {"id": "l", "source": "local", "text": "y" * 1000},
+    ]
+    enc = RecordingCrossEncoder([2.0, 0.5])  # arXiv scores higher...
+    rr = Reranker("fake", model=enc, max_chars=300)
+    assert [s["id"] for s in asyncio.run(rr.rerank(Q, srcs, 2))] == ["a", "l"]
+    assert all(len(t) == 300 for t in enc.texts)  # only the start of each passage is scored
+    boosted = asyncio.run(rr.rerank(Q, srcs, 2, library_boost=3.0))  # ...until the library prior applies
+    assert [s["id"] for s in boosted] == ["l", "a"] and boosted[0]["rerank_score"] == 0.5  # reported score raw
+
+
+def test_library_boost_reorders_but_never_admits(tmp_path):
+    class FakeArxiv:
+        async def search(self, question):
+            return [{"id": "arxiv_9999.00001", "source": "arxiv", "title": "Retrieval augmented generation hallucination",
+                     "url": "https://arxiv.org/abs/9999.00001", "authors": [], "published": "2026-01-01",
+                     "text": "Retrieval augmented generation hallucination. How retrieval augmented generation reduces hallucination."}]  # fmt: skip
+
+    def top(boost, min_score=0.0):
+        r = _retriever(tmp_path, min_score=min_score, arxiv=FakeArxiv(), arxiv_enabled=True, library_boost=boost)
+        return asyncio.run(r.aretrieve(Q, 3, use_arxiv=True)).sources
+
+    assert top(0.0)[0]["source"] == "arxiv"
+    boosted = top(0.5)
+    assert boosted[0]["source"] == "local" and boosted[0]["score"] < top(0.0)[0]["score"]  # score stays raw
+    strict = top(0.5, min_score=0.99)
+    assert all(s["score"] >= 0.99 for s in strict)  # the prior never lets a library source past MIN_SCORE

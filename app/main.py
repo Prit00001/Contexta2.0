@@ -15,7 +15,7 @@ from app.observability import RequestContextMiddleware, configure_logging
 from app.routes import router
 from app.routes_admin import router as admin_router
 from app.routes_workspace import router as workspace_router
-from core import db
+from core import db, tracing
 from core.cache import make_answer_cache
 from core.embeddings import Embedder
 from core.generator import Generator
@@ -27,6 +27,9 @@ from services.arxiv_client import ArxivClient
 from services.search_service import SearchService
 
 STATIC = Path(__file__).parent / "static"
+# The React app (frontend/, `pnpm build`). When it isn't built - e.g. a Python-only dev setup - the
+# original static pages in app/static are served instead.
+FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 log = logging.getLogger("contexta")
 
 
@@ -34,6 +37,7 @@ log = logging.getLogger("contexta")
 async def lifespan(app: FastAPI):
     s = get_settings()
     configure_logging(s.log_level, s.log_format)
+    tracing.configure_tracing(s.tracing_enabled)
     embedder = Embedder(s.embed_backend, s.embed_model, s.model_cache_dir)
     retriever = Retriever(embedder, s.cache_dir / "embeddings.npz")
     retriever.build(DOCUMENTS)
@@ -55,7 +59,7 @@ async def lifespan(app: FastAPI):
         arxiv,
         generator,
         answer_cache=make_answer_cache(redis, s.answer_cache_ttl),
-        reranker=Reranker(s.rerank_model, s.model_cache_dir) if s.rerank_model else None,
+        reranker=Reranker(s.rerank_model, s.model_cache_dir, max_chars=s.rerank_max_chars) if s.rerank_model else None,
     )
     app.state.limiter = make_limiter(redis, s.rate_limit_per_min)
     app.state.db_configured = bool(s.database_url)
@@ -81,6 +85,7 @@ async def lifespan(app: FastAPI):
         extra={"event": "startup", "status": "degraded" if embedder.degraded else "ok"},
     )
     yield
+    tracing.shutdown_tracing()
     await client.aclose()
     if redis is not None:
         await redis.aclose()
@@ -115,9 +120,25 @@ def create_app(http_transport: httpx.AsyncBaseTransport | None = None) -> FastAP
     app.include_router(workspace_router)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
-    @app.get("/", include_in_schema=False)
-    async def index():
-        return FileResponse(STATIC / "index.html")
+    if (FRONTEND_DIST / "index.html").exists():
+        app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+        spa = FRONTEND_DIST / "index.html"
+
+        @app.get("/", include_in_schema=False)
+        @app.get("/workspace", include_in_schema=False)
+        @app.get("/workspace/{_path:path}", include_in_schema=False)
+        async def spa_page(_path: str = ""):
+            return FileResponse(spa)  # client-side routing (react-router) takes it from here
+
+    else:
+
+        @app.get("/", include_in_schema=False)
+        async def index():
+            return FileResponse(STATIC / "index.html")
+
+        @app.get("/workspace", include_in_schema=False)
+        async def workspace_page():
+            return FileResponse(STATIC / "workspace.html")
 
     return app
 

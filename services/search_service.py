@@ -80,6 +80,7 @@ class SearchService:
             arxiv_budget_s=settings.arxiv_budget_s, min_score=settings.min_score_for(embedder.backend),
             hybrid_bm25_enabled=settings.hybrid_bm25_enabled,
             reranker=reranker, rerank_candidates=settings.rerank_candidates,
+            library_boost=settings.library_boost, rerank_library_boost=settings.rerank_library_boost,
         )  # fmt: skip
         # core.cache: Redis-backed (shared across instances) when REDIS_URL is set, else per process
         self.cache = answer_cache if answer_cache is not None else InMemoryAnswerCache(settings.answer_cache_ttl)

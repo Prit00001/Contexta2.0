@@ -1,0 +1,7 @@
+# Optional: export traces over OTLP/HTTP (TRACING_ENABLED=true). Not installed in the default image;
+# build with --build-arg WITH_OTEL=true, or pip install -r requirements-otel.txt. Compiled with:
+#   uv pip compile requirements-otel.in --universal --python-version 3.11 -o requirements-otel.txt
+# The -c line keeps shared versions identical to requirements.txt.
+-c requirements.txt
+opentelemetry-sdk>=1.30,<2.0
+opentelemetry-exporter-otlp-proto-http>=1.30,<2.0

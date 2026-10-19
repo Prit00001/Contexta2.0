@@ -7,13 +7,23 @@ rate-limited via Redis/Upstash (core/rate_limit.py, in-memory fallback if unconf
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import hashlib
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
 from app.deps import AuthContext, require_role
-from app.schemas import DocumentOut, UploadResponse, WorkspaceAskRequest, WorkspaceAskResponse
-from core import db
+from app.schemas import (
+    ConversationDetail,
+    ConversationOut,
+    DocumentOut,
+    UploadResponse,
+    WorkspaceAskRequest,
+    WorkspaceAskResponse,
+)
+from core import conversations, db
+from core.followup import MAX_TURNS
 from core.storage import get_storage, safe_filename
 from services.workspace_qa import ask_workspace
 
@@ -174,6 +184,26 @@ async def delete_document(
     await asyncio.to_thread(_delete)
 
 
+def _require_user(ctx: AuthContext) -> str:
+    """Stored conversations belong to a person; a workspace API key has no user to own them."""
+    if not ctx.user_id:
+        raise HTTPException(403, "Stored conversations need a signed-in user; API keys can send `history` instead.")
+    return ctx.user_id
+
+
+async def _in_thread(pool, fn, *args, **kwargs):
+    """Run ``fn(conn, *args, **kwargs)`` on a pooled connection in a worker thread."""
+
+    def _run():
+        conn = db.get_pool_conn(pool)
+        try:
+            return fn(conn, *args, **kwargs)
+        finally:
+            db.put_pool_conn(pool, conn)
+
+    return await asyncio.to_thread(_run)
+
+
 @router.post("/ask", response_model=WorkspaceAskResponse)
 async def ask(
     workspace_id: str, body: WorkspaceAskRequest, request: Request, ctx: AuthContext = Depends(require_role("viewer"))
@@ -181,12 +211,94 @@ async def ask(
     await _check_rate_limit(request, workspace_id, ctx)
     pool = request.app.state.db_pool
     st = request.app.state
+    retention = st.settings.history_retention_days
+    cid = str(body.conversation_id) if body.conversation_id else None
+    history = [t.model_dump() for t in body.history]
+    user_id = _require_user(ctx) if cid or body.save else None
+    if cid:
+        if not await _in_thread(
+            pool, conversations.get_conversation, cid, workspace_id=workspace_id, user_id=user_id,
+            retention_days=retention,
+        ):  # fmt: skip
+            raise HTTPException(404, "Conversation not found.")
+        turns = await _in_thread(pool, conversations.get_turns, cid, last=MAX_TURNS)
+        history = [{"question": t["question"], "answer": t["answer"]} for t in turns]
     group_ids = await _allowed_group_ids(pool, ctx)
     conn = await asyncio.to_thread(db.get_pool_conn, pool)
     try:
         result = await ask_workspace(
-            conn, st.service.graph, st.embedder, workspace_id, body.question, body.top_k, group_ids
+            conn, st.service.graph, st.embedder, workspace_id, body.question, body.top_k, group_ids, history or None
         )
     finally:
         await asyncio.to_thread(db.put_pool_conn, pool, conn)
-    return WorkspaceAskResponse(**result)
+    stored_sources = result.pop("stored_sources")
+    if body.save:  # created only once there is an answer to store, so a failed ask leaves no empty thread
+        cid = await _in_thread(
+            pool, conversations.create_conversation, workspace_id=workspace_id, user_id=user_id,
+            title=conversations.title_from(result["question"]),
+        )  # fmt: skip
+    if cid:
+        turn = {k: result[k] for k in ("question", "standalone_question", "answer", "outcome", "citations", "claims")}
+        await _in_thread(pool, conversations.append_turn, cid, turn | {"sources": stored_sources})
+    return WorkspaceAskResponse(**result, conversation_id=cid)
+
+
+# ---- Stored conversations (P2-14, ADR-006): visible only to their author ----
+
+
+def _iso(t: dt.datetime) -> str:
+    return t.isoformat()
+
+
+@router.get("/conversations", response_model=list[ConversationOut])
+async def list_conversations(
+    workspace_id: str, request: Request, ctx: AuthContext = Depends(require_role("viewer"))
+):
+    await _check_rate_limit(request, workspace_id, ctx)
+    rows = await _in_thread(
+        request.app.state.db_pool, conversations.list_conversations, workspace_id=workspace_id,
+        user_id=_require_user(ctx), retention_days=request.app.state.settings.history_retention_days,
+    )  # fmt: skip
+    return [
+        ConversationOut(
+            id=r["id"], title=r["title"], created_at=_iso(r["created_at"]), updated_at=_iso(r["updated_at"]),
+            turns=r["turns"],
+        )  # fmt: skip
+        for r in rows
+    ]
+
+
+@router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
+async def get_conversation(
+    workspace_id: str, conversation_id: UUID, request: Request, ctx: AuthContext = Depends(require_role("viewer"))
+):
+    await _check_rate_limit(request, workspace_id, ctx)
+    pool, retention = request.app.state.db_pool, request.app.state.settings.history_retention_days
+    conv = await _in_thread(
+        pool, conversations.get_conversation, str(conversation_id), workspace_id=workspace_id,
+        user_id=_require_user(ctx), retention_days=retention,
+    )  # fmt: skip
+    if conv is None:
+        raise HTTPException(404, "Conversation not found.")
+    turns = await _in_thread(pool, conversations.get_turns, conv["id"])
+    return ConversationDetail(
+        id=conv["id"],
+        title=conv["title"],
+        created_at=_iso(conv["created_at"]),
+        updated_at=_iso(conv["updated_at"]),
+        expires_at=_iso(conv["updated_at"] + dt.timedelta(days=retention)),
+        turns=[t | {"created_at": _iso(t["created_at"])} for t in turns],
+    )
+
+
+@router.delete("/conversations/{conversation_id}", status_code=204)
+async def delete_conversation(
+    workspace_id: str, conversation_id: UUID, request: Request, ctx: AuthContext = Depends(require_role("viewer"))
+):
+    await _check_rate_limit(request, workspace_id, ctx)
+    deleted = await _in_thread(
+        request.app.state.db_pool, conversations.delete_conversation, str(conversation_id),
+        workspace_id=workspace_id, user_id=_require_user(ctx),
+    )  # fmt: skip
+    if not deleted:
+        raise HTTPException(404, "Conversation not found.")
