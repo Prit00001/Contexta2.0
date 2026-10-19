@@ -103,6 +103,17 @@ LLM_PROVIDERS=custom LLM_BASE_URL=http://127.0.0.1:9009/v1 LLM_MODEL=fake-llm \
 
 The stub quotes the retrieved sources with citations — it exercises the real pipeline but is not a model.
 
+### Checking every workflow node live
+
+```bash
+GROQ_API_KEY=... PYTHONPATH=. python scripts/live_node_check.py
+```
+
+Drives each LangGraph node (validate_request, contextualize, rewrite in every mode, retrieve, generate,
+validate_answer, check_claims, fallback, insufficient_evidence, finalize) and `/ask/stream` through the real
+API with a real LLM and live arXiv, and prints the trace each request took (~20 LLM calls). Routes a live
+model can't be steered into on demand are pinned offline by `tests/test_graph_routes.py`.
+
 ### Using OpenRouter only (or a local Ollama)
 
 ```bash
@@ -239,7 +250,7 @@ services/   research_graph.py (LangGraph) · search_service.py · arxiv_client.p
             workspace_qa.py · retrieval.py · ingestion.py · worker.py
 data/       documents.py (paper library)
 eval/       run_eval.py · rewrite_eval.py · dataset/ (questions.jsonl, review sheet)
-scripts/    smoke_test.py · fake_llm_server.py · migrate.py
+scripts/    smoke_test.py · fake_llm_server.py · live_node_check.py · fetch_arxiv_snapshot.py · migrate.py
 tests/      unit · integration/ · e2e/
 docs/       requirements · architecture · decisions · implementation · testing · operations · research · roadmap
 ```

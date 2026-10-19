@@ -2,6 +2,12 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Node-by-node workflow check (2026-10-19)
+
+### Added
+- `tests/test_graph_routes.py`: 18 routes through the research graph with the exact (node, status) trace each must produce, plus a check that every node is reached. Four statuses (`invalid`, `empty`, `no_llm`, `unusable`) were previously untested; it also pins that claim-checking an extractive fallback makes no LLM call.
+- `scripts/live_node_check.py`: drives every node and `/ask/stream` through the real API with a real LLM and live arXiv. 11/11 checks pass against Groq `gpt-oss-120b`.
+
 ## [Unreleased] — Library prior: answer-level check (2026-10-19)
 
 ### Added
