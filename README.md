@@ -45,7 +45,7 @@ FastAPI · LangGraph · LangChain · FAISS · fastembed (all-MiniLM-L6-v2, ONNX)
 | Local rewriter | `REWRITE_PROVIDERS=custom` + `LLM_BASE_URL` → rewrite with a local Ollama model, answer with the hosted chain (condition 6) |
 | Comparison harness | `PYTHONPATH=. python eval/run_eval.py --rewrite all` — measured with gpt-oss-120b: `decompose` R@1 0.711 → 0.765, R@5 0.977 → 0.992 for one LLM call; `single` best on paraphrase (R@1 0.72 → 0.82). Default stays `off` (owner decision). EVALUATION_REPORT §5f |
 
-Not verified from the build environment (network-restricted): live arXiv, real LLM providers, the real embedding-model download, and the Docker build. See [Known limitations](#known-limitations).
+Verified for real on 2026-10-18/19: Groq LLM answers, the MiniLM and reranker downloads, and the Docker image (built and run with no network). Live arXiv is still only tested through mocks. See [Known limitations](#known-limitations).
 
 ## Architecture
 
@@ -117,7 +117,7 @@ docker run -p 8000:8000 --env-file .env contexta        # API only
 docker compose up --build                               # API + worker + Postgres/pgvector (+ migrations)
 ```
 
-The image installs from the lockfile and bakes the embedding model in at build time. *The Docker build was not executed during Phase 1* (registry blocked in the build environment); CI builds and smoke-tests the image.
+The image installs from the lockfile and bakes the embedding model and the reranker in at build time. Verified 2026-10-19: built from this Dockerfile and run with `--network none` — ready in ~4 s, both models load from the image, healthcheck `healthy`, ~395 MiB RAM. (GitHub Actions is not enabled on this repository yet, so CI has not run it.)
 
 ## API usage
 
