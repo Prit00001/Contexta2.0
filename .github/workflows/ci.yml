@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, phase-1]
+    branches: [main, phase-1, phase-2]
   pull_request:
+  workflow_dispatch:  # "Run workflow" button in the Actions tab
 
 permissions:
   contents: read
