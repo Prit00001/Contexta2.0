@@ -2,6 +2,14 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Stored workspace conversations (P2-14) (2026-10-19)
+
+### Added
+- Server-side conversation history for workspace Q&A ([ADR-006](docs/decisions/ADR-006-conversation-history.md)), on the design the owner approved: visible only to the author (not other members, not admins), deleted 30 days after the last turn, full source passages stored per turn.
+- `POST /workspaces/{id}/ask`: `save` starts a thread, `conversation_id` continues it (the server supplies the last 3 turns as history), `history` for stateless follow-ups as in `/ask`; responses carry `conversation_id` and `standalone_question`.
+- `GET /workspaces/{id}/conversations`, `GET` / `DELETE /workspaces/{id}/conversations/{cid}`.
+- Migration `0003_conversations.sql` (tables + author-only RLS), `HISTORY_RETENTION_DAYS` (default 30); expired threads are hidden on read and deleted hourly by the worker.
+
 ## [Unreleased] — Tracing (P2-15) (2026-10-19)
 
 ### Added

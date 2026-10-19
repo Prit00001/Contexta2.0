@@ -69,12 +69,17 @@ async def ask_workspace(
     question: str,
     top_k: int = 5,
     allowed_group_ids: Optional[List[str]] = None,
+    history: Optional[List[dict]] = None,
 ) -> dict:
+    """``history``: earlier turns ({"question", "answer"}, oldest first) when ``question`` is a
+    follow-up - client-sent or loaded from a stored conversation. The result's ``stored_sources``
+    holds the full passages (for conversation storage) and is not part of the API response."""
     question = " ".join(question.split())
     retriever = WorkspaceChunkRetriever(conn, embedder, workspace_id, allowed_group_ids)
     state = await run_research(
         graph, retriever, question, top_k,
         empty_message="The documents in this workspace don't contain information to answer that.",
+        history=history,
     )  # fmt: skip
     report = state["citation_report"]
     sources = state.get("sources", [])
@@ -103,4 +108,9 @@ async def ask_workspace(
         "citation_check": report.summary(),
         "workflow": state["trace"],
         "query_rewrites": state.get("query_rewrites", []),
+        "standalone_question": state["question"] if state.get("followup_question") else None,
+        "stored_sources": [
+            {k: c[k] for k in ("document_id", "filename", "page_number", "section_heading", "score")} | {"text": s["text"]}
+            for c, s in zip(citations_out, sources, strict=True)
+        ],
     }

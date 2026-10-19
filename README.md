@@ -171,7 +171,7 @@ Streaming: `POST /ask/stream` takes the same body and sends events `stage`, `sou
 curl -N http://localhost:8000/ask/stream -H 'content-type: application/json' -d '{"question": "What is LoRA?"}'
 ```
 
-Other endpoints: `POST /ask-pdf` (multipart `question`, `file`, `top_k`), `GET /health`, `GET /ready`, `GET /metrics` (Prometheus), and the workspace API under `/workspaces/...` (see `/docs`). Errors: 422 invalid input, 429 rate limited (`Retry-After`), 500 generic with `request_id`, 503 retrieval unavailable.
+Other endpoints: `POST /ask-pdf` (multipart `question`, `file`, `top_k`), `GET /health`, `GET /ready`, `GET /metrics` (Prometheus), and the workspace API under `/workspaces/...` (see `/docs`). Workspace users can keep conversations: `POST /workspaces/{id}/ask` with `"save": true` returns a `conversation_id` to continue with; `GET`/`DELETE /workspaces/{id}/conversations[/{cid}]` list, read and delete them. Threads are visible only to their author and deleted 30 days after the last turn ([ADR-006](docs/decisions/ADR-006-conversation-history.md)). Errors: 422 invalid input, 429 rate limited (`Retry-After`), 500 generic with `request_id`, 503 retrieval unavailable.
 
 ## Configuration
 

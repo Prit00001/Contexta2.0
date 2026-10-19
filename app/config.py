@@ -129,6 +129,8 @@ class Settings(BaseModel):
     supabase_jwt_secret: str = Field("", repr=False)
     redis_url: str = Field("", repr=False)
     workspace_rate_limit_per_min: int = Field(60, ge=0)
+    # Stored workspace conversations (P2-14, ADR-006): deleted this many days after the last turn
+    history_retention_days: int = Field(30, ge=1, le=3650)
 
     def min_score_for(self, backend: str) -> float:
         """MIN_SCORE if set explicitly, else the calibrated default for the backend actually in use

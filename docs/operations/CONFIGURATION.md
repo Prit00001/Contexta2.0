@@ -86,6 +86,7 @@ Traced (`TRACING_ENABLED=true`): FastAPI's own server span (method, route, `url.
 | `MAX_UPLOAD_MB` | `20` | Workspace uploads |
 | `REDIS_URL` | – | Shared answer cache, `/ask` and workspace rate limits across instances; falls back to in-memory if unset or unreachable |
 | `WORKSPACE_RATE_LIMIT_PER_MIN` | `60` | |
+| `HISTORY_RETENTION_DAYS` | `30` | Stored workspace conversations ([ADR-006](../decisions/ADR-006-conversation-history.md)) are hidden once idle this long and deleted by the worker (`python -m services.worker`, hourly). Only their author can see them; each turn keeps the full source passages, which therefore outlive a deleted document until the thread expires. Apply migration `0003_conversations.sql` (`python scripts/migrate.py`) before upgrading |
 
 ## Safe local setup
 
