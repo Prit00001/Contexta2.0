@@ -2,6 +2,11 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Library prior: answer-level check (2026-10-19)
+
+### Added
+- `eval/boost_compare.py`: answers the questions whose sources change between two `RERANK_LIBRARY_BOOST` values and has a judge model pick the better answer blind. EVALUATION_REPORT §5i: boost 3 vs 0 is 4 better / 3 worse / 33 ties on 40 questions, so the default stays.
+
 ## [Unreleased] — Phase 3 H5: local rewriter (2026-10-19)
 
 ### Added

@@ -389,6 +389,53 @@ Reading:
 - **Recommendation:** keep rewriting off by default (§5f/ADR-004). Anyone who enables it should use a
   hosted model, or a local ≥7B model on a GPU; a CPU-only 7B adds 4–10 s per question.
 
+## 5i. Does the library prior cost answer quality? (2026-10-19)
+
+§5g chose `RERANK_LIBRARY_BOOST=3` on retrieval metrics whose gold labels are all library papers, so
+it could not say whether the arXiv papers the prior pushes down would have produced better answers.
+`eval/boost_compare.py` measures that at the answer level on the default path (arXiv snapshot
+replayed, reranker on, MiniLM, `MIN_SCORE` 0.225):
+
+1. Retrieve every question with boost 0 and boost 3. **81 of 143** get a different top 5 (24 of them
+   the same five sources in another order); the other 62 would give identical prompts.
+2. Answer a random 40 of those 81 under both settings with Groq `gpt-oss-120b` (80 answer calls).
+3. A judge (`gpt-oss-20b`, a different model) sees the question and both answers, each with the
+   source texts it cites, in random order, and picks the better one: grounding first, then whether it
+   answers the question, then completeness; told not to favour length or source type.
+
+0 questions were still rate-limited at the end; 0 judge outputs were unusable.
+
+| Type | n | boost 3 better | boost 0 better | tie |
+|---|---|---|---|---|
+| paraphrase | 18 | 3 | 1 | 14 |
+| comparison | 10 | 1 | 1 | 8 |
+| unanswerable | 7 | 0 | 1 | 6 |
+| single_fact | 5 | 0 | 0 | 5 |
+| **all** | **40** | **4** | **3** | **33** |
+
+| | boost 0 | boost 3 |
+|---|---|---|
+| arXiv share of the sources the answer saw | 0.60 | 0.43 |
+| arXiv share of the sources the answer cited | 0.19 | 0.14 |
+| `insufficient_evidence` outcomes (of 40) | 5 | 4 |
+
+Reading:
+- **No measurable difference in answer quality.** 33 of 40 pairs are ties, and 4 against 3 is well
+  within noise for n = 40. The prior changes what the model *sees* (arXiv share of sources 60% → 43%)
+  much more than what it *cites* (19% → 14%): with or without the boost, the answer model mostly cites
+  the library paper when one is in the top 5.
+- The decisive pairs go both ways for ordinary reasons: q084 (DPR vs Sentence-BERT) abstained at
+  boost 0 because the second library paper had been pushed out, and was answered at boost 3; q055 lost
+  at boost 3 because the boost 0 sources happened to cover more of a broad question.
+- The "unanswerable" questions are unanswerable *from the library*. Of the 7 here, 4 abstained under
+  both settings and 2 were answered from arXiv under both, which is what the arXiv path is for. One
+  (q135) was answered from library passages under both settings; the boost did not cause that.
+- **Decision unchanged:** keep `RERANK_LIBRARY_BOOST=3`. It recovers the retrieval metrics of §5g
+  (R@1 0.653 → 0.765) and, on this evidence, does not make answers worse.
+- Limits: one judge model, n = 40, an LLM-drafted unreviewed question set. The judge picked position B
+  in 5 of 7 decisive pairs: a slight position bias, which the random order spreads evenly across both
+  settings. This is not a substitute for arXiv-aware gold labels.
+
 ## 6. Known limitations of this dataset
 
 - Unreviewed (see §1) — treat as provisional.

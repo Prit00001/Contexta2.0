@@ -39,5 +39,7 @@ above the original paper. Reranking also cost 1.0–1.6 s on this path because a
 - The boost values are fitted to an unreviewed, library-targeted question set; they favour finding the
   library paper. A deployment that wants more arXiv weight lowers them (EVALUATION_REPORT §5g has the
   curve).
-- Not measured: whether the displaced arXiv papers would have produced *better answers*; that needs
-  arXiv-aware gold labels or an answer-level evaluation on the arXiv path.
+- Answer quality checked (EVALUATION_REPORT §5i): on 40 questions whose sources the boost changes, a
+  blind LLM judge rated boost 3 vs boost 0 as 4 better, 3 worse, 33 ties - no measurable cost. The
+  model mostly cites the library paper either way (arXiv share of citations 19% → 14%). Arxiv-aware
+  gold labels would still be the stronger test.
