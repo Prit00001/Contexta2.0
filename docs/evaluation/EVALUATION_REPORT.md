@@ -300,13 +300,66 @@ Reading:
   R@5 0.991, +0.4 s, no LLM call or quota) gets about the same gain as `decompose`; their
   combination on clean data was not measured.
 
+## 5g. The default path: library + live arXiv (2026-10-19)
+
+Until now every retrieval number was library-only (`use_arxiv=False`), but `/ask` mixes in live arXiv
+by default. With arXiv reachable, `scripts/fetch_arxiv_snapshot.py` froze the live results for all 143
+questions (1,716 papers, `eval/dataset/arxiv_snapshot.jsonl`) and `eval/run_eval.py --arxiv` replays
+them. A library paper returned through its arXiv copy still counts as gold; arXiv-only papers never do
+(the dataset has no arXiv gold), so some "misses" below may be relevant arXiv papers — but each
+question was written about a specific library paper, and losing it from the top results is a real
+regression.
+
+**Before** (MiniLM, overall, 110 answerable questions):
+
+| Path | R@1 | R@5 | MRR | arXiv-only share of top 5 | p95 retrieval |
+|---|---|---|---|---|---|
+| library only (all earlier sections) | 0.711 | 0.977 | 0.908 | 0 | 12 ms |
+| + arXiv, hybrid | 0.603 | 0.867 | 0.798 | 0.63 | 253 ms* |
+| + arXiv, reranked (default since 2026-10-19) | 0.653 | 0.876 | 0.823 | 0.65 | 1,356 ms |
+| + arXiv, BM25 fusion | 0.747 | 1.000 | 0.934 | **0.007** | 260 ms* |
+
+\* replayed snapshot: the live arXiv call (~1.6–2.4 s measured) is not included.
+
+BM25 fusion "wins" only by pushing arXiv out of the results entirely — the structural bias ADR-003
+predicted (BM25 indexes the library only), now measured; it stays off. Comparison questions suffered
+most: reranked R@5 0.984 → 0.729.
+
+**Library prior** (ADR-005): a boost added to library sources' *ranking* key only; `MIN_SCORE` still
+judges their raw score.
+
+| Prior | R@1 | R@5 | MRR | comparison R@5 | arXiv share |
+|---|---|---|---|---|---|
+| hybrid, `LIBRARY_BOOST` 0.05 / 0.1 / 0.2 | 0.670 / **0.711** / 0.711 | 0.897 / **0.933** / 0.959 | 0.862 / 0.901 / 0.904 | 0.896 / 0.927 / 0.953 | 0.52 / **0.41** / 0.21 |
+| reranked, `RERANK_LIBRARY_BOOST` 1 / 2 / **3** / 5 | 0.694 / 0.735 / **0.765** / 0.774 | 0.912 / 0.930 / **0.953** / 0.970 | 0.862 / 0.901 / **0.932** / 0.944 | 0.823 / 0.854 / **0.932** / 0.958 | 0.61 / 0.57 / **0.53** / 0.44 |
+
+**Rerank passage length** (`RERANK_LIBRARY_BOOST` 3): arXiv abstracts are ~4× longer than library
+entries, so reranking cost 1.0–1.6 s per question on this path.
+
+| `RERANK_MAX_CHARS` | R@1 | R@5 | MRR | p95 retrieval |
+|---|---|---|---|---|
+| whole passage | 0.765 | 0.953 | 0.932 | 1,242 ms |
+| 300 | 0.752 | 0.956 | 0.923 | 675 ms |
+| **500** | **0.765** | **0.944** | **0.934** | **493 ms** |
+| 800 | 0.761 | 0.953 | 0.925 | 624 ms |
+
+Library-only results are unchanged at 500 (all library passages are ≤ 402 characters): R@1 0.783,
+R@5 0.991. Latency figures are from a shared machine and noisy at ±150 ms.
+
+**New defaults:** `RERANK_LIBRARY_BOOST=3`, `RERANK_MAX_CHARS=500`, and `LIBRARY_BOOST=0.1` (used only
+when reranking is off). On the default path that is R@1 0.603 → **0.765**, R@5 0.867 → **0.944**, with
+arXiv still about half of the top 5. Live check (real arXiv + Groq): LoRA and DPR-vs-ColBERT questions
+put the library papers first with recent arXiv work after them; a topic the library doesn't cover
+(speculative decoding) is answered entirely from arXiv; reranking 130–200 ms, total 2.6–3.2 s
+(4.2–5.5 s before).
+
 ## 6. Known limitations of this dataset
 
 - Unreviewed (see §1) — treat as provisional.
 - Same model drafted the questions and knows the corpus — risk of unconsciously phrasing questions
   that are easier for retrieval than a real user's question would be, despite the explicit
   instruction to use different vocabulary for `paraphrase` items.
-- No arXiv-sourced questions (snapshot not fetched — B-2 blocked everywhere tried so far).
+- No arXiv-only gold labels: the arXiv snapshot (§5g) exists, but every question targets a library paper.
 - 25-document corpus is small; retrieval metrics on a corpus this size don't necessarily predict
   behavior at realistic scale (this is also why Qdrant/chunking, P2-08/09, stay deferred — there's
   nothing here yet that would show a difference).

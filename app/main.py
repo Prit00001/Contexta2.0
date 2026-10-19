@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
         arxiv,
         generator,
         answer_cache=make_answer_cache(redis, s.answer_cache_ttl),
-        reranker=Reranker(s.rerank_model, s.model_cache_dir) if s.rerank_model else None,
+        reranker=Reranker(s.rerank_model, s.model_cache_dir, max_chars=s.rerank_max_chars) if s.rerank_model else None,
     )
     app.state.limiter = make_limiter(redis, s.rate_limit_per_min)
     app.state.db_configured = bool(s.database_url)

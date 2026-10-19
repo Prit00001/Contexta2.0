@@ -2,6 +2,15 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Library + arXiv path (2026-10-19)
+
+### Added
+- `scripts/fetch_arxiv_snapshot.py` and `eval/dataset/arxiv_snapshot.jsonl` (143 questions, 1,716 live arXiv papers); `eval/run_eval.py --arxiv` replays it, so `/ask`'s default path is measured for the first time.
+- `RERANK_LIBRARY_BOOST` / `LIBRARY_BOOST` library prior and `RERANK_MAX_CHARS` ([ADR-005](docs/decisions/ADR-005-library-prior.md)).
+
+### Changed
+- Defaults `RERANK_LIBRARY_BOOST=3`, `LIBRARY_BOOST=0.1` (only without the reranker), `RERANK_MAX_CHARS=500`: default-path R@1 0.603 → 0.765, R@5 0.867 → 0.944; rerank p95 ~1.24 s → ~0.5 s.
+
 ## [Unreleased] — Defaults from the measured runs (2026-10-19)
 
 ### Changed

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Accepted, **off by default** |
+| Status | Accepted, **off by default** — the suspected arXiv bias was confirmed on 2026-10-19 (EVALUATION_REPORT §5g: arXiv share of the top 5 falls to 0.7%); see ADR-005 for the alternative adopted |
 | Date | 2026-10-18 |
 | Scope | Contexta 2.0, Phase 2 |
 

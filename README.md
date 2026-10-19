@@ -35,6 +35,7 @@ FastAPI · LangGraph · LangChain · FAISS · fastembed (all-MiniLM-L6-v2, ONNX)
 | Fast offline start | Uncached model + no network: 46 s → ~5 s before falling back to hash embeddings |
 | Reranking | **On by default** (`RERANK_MODEL=Xenova/ms-marco-MiniLM-L-6-v2`, `none` to disable): a small cross-encoder reorders the top 20 sources — R@1 0.711 → 0.783, +0.4 s, 411 MB peak RAM |
 | Follow-up questions | Send `history` (last ≤3 turns) with `/ask` or `/ask/stream`; the follow-up is rewritten into a standalone question (`standalone_question`). Nothing is stored or logged server-side; the web page keeps turns in tab memory only |
+| Library + arXiv ranking | First measurement of the default path (library + live arXiv): arXiv was pushing out the library paper (R@1 0.711 → 0.603). A library prior and shorter rerank passages bring it to R@1 0.765 / R@5 0.944 with arXiv still ~half the sources, rerank ~0.5 s → [ADR-005](docs/decisions/ADR-005-library-prior.md) |
 | Streaming answers | `POST /ask/stream` (server-sent events): sources first, then answer tokens as the model writes, then the full validated `/ask` response; the web page uses it |
 
 ### Phase 3 (experimental, off by default)
@@ -215,7 +216,7 @@ Current: **241 passed** (Python 3.13, with Postgres 16 + pgvector and a local `r
 - `MIN_SCORE` is calibrated on the LLM-drafted, unreviewed eval set; recheck after the human review.
 - The evaluation questions were LLM-drafted and are not yet human-reviewed; treat every quality number as provisional.
 - The library is 25 curated abstracts; arXiv search is keyword-based and best-effort.
-- Live arXiv has still only been exercised through mocks; providers and the model download were verified for real in Phase 2.
+- Live arXiv, providers and model downloads are verified for real; arXiv-path quality is measured against library-paper gold labels only (no arXiv-aware labels), so it favours finding the library paper.
 - Caches and the `/ask` rate limiter are per process unless `REDIS_URL` is set. The PDF-embedding cache is always per process.
 - `/ask` is intentionally unauthenticated (public demo), protected by rate limiting.
 

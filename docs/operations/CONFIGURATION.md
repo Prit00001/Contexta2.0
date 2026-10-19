@@ -38,6 +38,9 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 | `CACHE_DIR` | `.cache` (`/tmp/contexta-cache` on Vercel) | Library embedding cache (`embeddings.npz`) |
 | `RERANK_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` | Cross-encoder reranking (P2-07), **on by default** since measured: R@1 0.711 → 0.783, R@5 0.977 → 0.991 for +0.4 s per search and ~120 MB RAM (411 MB peak with both models). Reorders sources that passed `MIN_SCORE`, never adds any. Baked into the Docker image; unloadable → off, reported by `/ready`. `none` disables |
 | `RERANK_CANDIDATES` | `20` | How many retrieved sources the reranker scores before keeping `top_k` |
+| `RERANK_MAX_CHARS` | `500` | Score only the first N characters of each passage when reranking (0 = whole text). Keeps quality, ~2.5× faster on the arXiv path (EVALUATION_REPORT §5g) |
+| `RERANK_LIBRARY_BOOST` | `3` | With reranking on: bonus (cross-encoder logit units) for curated-library sources over live arXiv in the final order. 0 = none; 5 = more library, less arXiv ([ADR-005](../decisions/ADR-005-library-prior.md)) |
+| `LIBRARY_BOOST` | `0.1` | Same prior on the hybrid score, used only when reranking is off. Never lets a source past `MIN_SCORE` |
 | `MIN_SCORE` | per backend | Hybrid-score cut for library/arXiv sources, [-1, 1]. Unset: `0.225` on fastembed (MiniLM), `0.075` on hash embeddings (incl. the fallback) — calibrated with `eval/run_eval.py --sweep-min-score` |
 | `ARXIV_ENABLED` | `true` | Global switch; per request `use_arxiv` |
 | `ARXIV_MAX_RESULTS` | `12` | 1–50 |

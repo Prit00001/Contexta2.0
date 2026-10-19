@@ -151,13 +151,16 @@ async def run_retrieval(
     library.build(DOCUMENTS)
     reranker = None
     if rerank:  # P2-07: RERANK_MODEL, or the small default cross-encoder
-        reranker = Reranker(settings.rerank_model or DEFAULT_RERANK_MODEL, settings.model_cache_dir)
+        reranker = Reranker(
+            settings.rerank_model or DEFAULT_RERANK_MODEL, settings.model_cache_dir, max_chars=settings.rerank_max_chars
+        )
         if not reranker.available:
             raise SystemExit(f"--rerank: could not load {reranker.model_name} ({reranker.error}); is the network up?")
     retriever = ResearchRetriever(
         embedder=embedder, library=library, arxiv=SnapshotArxiv() if arxiv else None, arxiv_enabled=arxiv,
         arxiv_budget_s=settings.arxiv_budget_s, min_score=0.0,  # score the full ranking, not just >= MIN_SCORE
         hybrid_bm25_enabled=hybrid_bm25, reranker=reranker, rerank_candidates=settings.rerank_candidates,
+        library_boost=settings.library_boost, rerank_library_boost=settings.rerank_library_boost,
     )  # fmt: skip
     same_paper = library_arxiv_ids()
 
