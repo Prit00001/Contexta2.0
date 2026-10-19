@@ -91,6 +91,25 @@ uvicorn app.main:app --reload
 
 Open http://localhost:8000 (UI) or http://localhost:8000/docs (interactive API docs). Stop with Ctrl+C.
 
+### Frontend (React + TypeScript, `frontend/`)
+
+The UI is a React app: **Papers** (`/`, streaming cited answers, PDF upload, follow-ups) and **Workspace**
+(`/workspace`: sign-in, workspaces, documents, a thread view with saved conversations at
+`/workspace/{id}/ask/{conversation}`, and admin screens for members and API keys).
+
+```bash
+cd frontend && corepack enable && pnpm install
+pnpm dev        # http://localhost:5173, proxies API calls to uvicorn on :8000 (hot reload)
+pnpm build      # writes frontend/dist; uvicorn then serves it at / and /workspace
+pnpm test       # vitest; pnpm typecheck for tsc
+```
+
+FastAPI serves `frontend/dist` when it exists (the Docker image builds it in a Node stage). Without a
+build it falls back to the original no-build pages in `app/static/`, so a Python-only setup still has
+a UI. Workspace sign-in uses email + password when `SUPABASE_URL` and `SUPABASE_ANON_KEY` are set;
+otherwise it asks for a pasted access token. Workspaces need `DATABASE_URL`, `SUPABASE_JWT_SECRET` and
+the worker (`python -m services.worker`) for ingestion.
+
 The first start downloads the embedding model (cached afterwards). Check `GET /ready`: if `embeddings` is not `ok`, the model couldn't be loaded and retrieval is running on low-quality hash vectors.
 
 ### Offline demo of the full LLM path (no API key)
@@ -171,9 +190,7 @@ Streaming: `POST /ask/stream` takes the same body and sends events `stage`, `sou
 curl -N http://localhost:8000/ask/stream -H 'content-type: application/json' -d '{"question": "What is LoRA?"}'
 ```
 
-Other endpoints: `POST /ask-pdf` (multipart `question`, `file`, `top_k`), `GET /health`, `GET /ready`, `GET /metrics` (Prometheus), and the workspace API under `/workspaces/...` (see `/docs`). Workspace users can keep conversations: `POST /workspaces/{id}/ask` with `"save": true` returns a `conversation_id` to continue with; `GET`/`DELETE /workspaces/{id}/conversations[/{cid}]` list, read and delete them. Threads are visible only to their author and deleted 30 days after the last turn ([ADR-006](docs/decisions/ADR-006-conversation-history.md)).
-
-**Workspace UI** at `/workspace` (linked from the main page): sign in (email + password when `SUPABASE_ANON_KEY` is set, otherwise paste an access token), pick or create a workspace, upload and delete documents with live ingestion status, and ask questions with a sidebar of your saved conversations. Needs `DATABASE_URL`, `SUPABASE_JWT_SECRET` and the worker (`python -m services.worker`) for ingestion. Errors: 422 invalid input, 429 rate limited (`Retry-After`), 500 generic with `request_id`, 503 retrieval unavailable.
+Other endpoints: `POST /ask-pdf` (multipart `question`, `file`, `top_k`), `GET /health`, `GET /ready`, `GET /metrics` (Prometheus), and the workspace API under `/workspaces/...` (see `/docs`). Workspace users can keep conversations: `POST /workspaces/{id}/ask` with `"save": true` returns a `conversation_id` to continue with; `GET`/`DELETE /workspaces/{id}/conversations[/{cid}]` list, read and delete them. Threads are visible only to their author and deleted 30 days after the last turn ([ADR-006](docs/decisions/ADR-006-conversation-history.md)). Errors: 422 invalid input, 429 rate limited (`Retry-After`), 500 generic with `request_id`, 503 retrieval unavailable.
 
 ## Configuration
 
@@ -204,10 +221,11 @@ pytest -q                     # unit + integration + E2E; no network, no API key
 make test-db                  # also run Postgres/pgvector tests (needs `docker compose up -d db`)
 make eval                     # retrieval metrics, offline;  make eval-sweep: MIN_SCORE calibration curve
 ruff check . && ruff format --check .
+cd frontend && pnpm typecheck && pnpm test   # React app (vitest + Testing Library)
 python scripts/smoke_test.py --base-url http://127.0.0.1:8000   # against a running server
 ```
 
-Current: **241 passed** (Python 3.13, with Postgres 16 + pgvector and a local `redis-server`; without them the DB tests skip and the Redis tests skip). Phase 1 ended at 181. Details: [TEST_REPORT](docs/testing/TEST_REPORT.md) · [TEST_STRATEGY](docs/testing/TEST_STRATEGY.md).
+Current: **305 passed** (Python 3.13, with Postgres 16 + pgvector and a local `redis-server`; without them the DB and Redis tests skip) and **12** frontend tests (vitest). Phase 1 ended at 181. Details: [TEST_REPORT](docs/testing/TEST_REPORT.md) · [TEST_STRATEGY](docs/testing/TEST_STRATEGY.md).
 
 ## Troubleshooting
 
@@ -243,7 +261,8 @@ Current: **241 passed** (Python 3.13, with Postgres 16 + pgvector and a local `r
 
 ```
 app/        main.py (factory, lifespan) · routes.py · routes_workspace.py · routes_admin.py · deps.py
-            config.py (validated settings) · schemas.py · observability.py · static/index.html
+            config.py (validated settings) · schemas.py · observability.py · static/ (no-build fallback UI)
+frontend/   React + TypeScript app (Vite, pnpm): src/pages (Search, workspace/*) · src/components · src/api
 core/       llm.py · prompts.py · lc_retriever.py · sources.py · citations.py   ← LangChain adapters
             claim_support.py · query_rewrite.py · cache.py · metrics.py
             generator.py · retriever.py · vector_store.py · embeddings.py · text.py · pdf.py

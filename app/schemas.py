@@ -343,6 +343,7 @@ class MemberOut(BaseModel):
     user_id: str
     role: str
     created_at: str
+    email: Optional[str] = None
 
 
 class ApiKeyCreateRequest(BaseModel):

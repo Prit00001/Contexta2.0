@@ -115,7 +115,7 @@ async def list_members(workspace_id: str, request: Request, ctx=Depends(require_
             db.put_pool_conn(pool, conn)
 
     rows = await asyncio.to_thread(_list)
-    return [MemberOut(user_id=str(r[0]), role=r[1], created_at=r[2].isoformat()) for r in rows]
+    return [MemberOut(user_id=str(r[0]), role=r[1], created_at=r[2].isoformat(), email=r[3]) for r in rows]
 
 
 @router.delete("/workspaces/{workspace_id}/members/{user_id}", status_code=204)

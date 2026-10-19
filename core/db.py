@@ -181,7 +181,11 @@ def remove_membership(conn, *, workspace_id: str, user_id: str) -> None:
 
 def list_memberships(conn, workspace_id: str):
     with conn.cursor() as cur:
-        cur.execute("SELECT user_id, role, created_at FROM memberships WHERE workspace_id=%s", (workspace_id,))
+        cur.execute(
+            "SELECT m.user_id, m.role, m.created_at, u.email FROM memberships m "
+            "LEFT JOIN auth.users u ON u.id = m.user_id WHERE m.workspace_id = %s ORDER BY m.created_at",
+            (workspace_id,),
+        )
         return cur.fetchall()
 
 

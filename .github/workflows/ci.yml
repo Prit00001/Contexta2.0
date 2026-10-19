@@ -21,6 +21,24 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
 
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -57,7 +75,7 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, frontend]
     steps:
       - uses: actions/checkout@v4
       - name: Build image (not pushed)
@@ -68,5 +86,6 @@ jobs:
           for i in $(seq 1 60); do curl -fsS localhost:8000/health && break; sleep 2; done
           curl -fsS localhost:8000/ready | tee ready.json
           python3 -c "import json; r=json.load(open('ready.json')); assert r['checks']['embeddings']['ok'], r"
+          curl -fsS localhost:8000/workspace | grep -q 'id="root"'  # the React app is served
           pip install "$(grep -E '^httpx==' requirements.txt)"
           python3 scripts/smoke_test.py --base-url http://127.0.0.1:8000 || (docker logs contexta; exit 1)

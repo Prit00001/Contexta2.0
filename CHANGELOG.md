@@ -2,6 +2,14 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — React frontend (P2-12) (2026-10-19)
+
+### Added
+- `frontend/`: React 19 + TypeScript app (Vite 8, react-router 7, pnpm; no UI library). **Papers** (`/`): streaming cited answers, PDF upload, follow-ups, evidence flags. **Workspace** (`/workspace`): sign-in, workspace picker and creation, documents with live ingestion status, threads with saved conversations at their own URL (`/workspace/{id}/ask/{conversation}`), **Members** (add by email, change role, remove) and **API keys** (create, shown once with copy, revoke) for admins. Escaped by construction (React); an error boundary keeps a failing view from blanking the app.
+- FastAPI serves `frontend/dist` at `/` and `/workspace/*` when built, else the original static pages.
+- Dockerfile: Node build stage; CI: `frontend` job (typecheck, vitest, build) and the Docker smoke test checks the app is served.
+- `GET /workspaces/{id}/members` now includes each member's `email`.
+
 ## [Unreleased] — Workspace UI (2026-10-19)
 
 ### Added

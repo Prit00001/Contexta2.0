@@ -1,5 +1,15 @@
 # Contexta 2.0 API image. Python 3.11 matches the oldest interpreter the lockfile and test suite
 # are verified on (3.11 and 3.13).
+
+# ---- React frontend (frontend/): built here, served by FastAPI from /app/frontend/dist ----
+FROM node:22-slim AS frontend
+WORKDIR /fe
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable && pnpm install --frozen-lockfile
+COPY frontend/ ./
+RUN pnpm build
+
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -30,6 +40,7 @@ RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='se
     && python -c "from fastembed.rerank.cross_encoder import TextCrossEncoder; TextCrossEncoder(model_name='Xenova/ms-marco-MiniLM-L-6-v2', cache_dir='/app/.model_cache')"
 
 COPY . .
+COPY --from=frontend /fe/dist /app/frontend/dist
 RUN useradd -m appuser && mkdir -p /app/.cache /app/.storage && chown -R appuser /app
 USER appuser
 

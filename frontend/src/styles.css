@@ -1,0 +1,195 @@
+/* Design tokens carried over from the original static UI */
+:root {
+  --bg: #fafafa;
+  --field: #ffffff;
+  --ink: #18181b;
+  --muted: #71717a;
+  --faint: #a1a1aa;
+  --line: #e4e4e7;
+  --accent: #4f46e5;
+  --accent-ink: #ffffff;
+  --accent-soft: #eef2ff;
+  --err: #dc2626;
+  --warn: #b45309;
+  --ok: #15803d;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c0c0e;
+    --field: #141417;
+    --ink: #ececef;
+    --muted: #a1a1aa;
+    --faint: #63636b;
+    --line: #27272c;
+    --accent: #a5b4fc;
+    --accent-ink: #0c0c0e;
+    --accent-soft: #1e1b3a;
+    --err: #f87171;
+    --warn: #fbbf24;
+    --ok: #4ade80;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.6 var(--font); -webkit-font-smoothing: antialiased }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px }
+[hidden] { display: none !important }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer }
+a { color: var(--accent) }
+code { font-size: .9em }
+
+input[type=text], input[type=email], input[type=password], textarea, select {
+  font: inherit; color: inherit; background: var(--field); border: 1px solid var(--line);
+  border-radius: 10px; padding: 9px 12px; width: 100%;
+}
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent) }
+
+.btn { background: var(--accent); color: var(--accent-ink); font-weight: 600; font-size: 14px; border-radius: 9px; padding: 8px 16px; white-space: nowrap }
+.btn:disabled { opacity: .5; cursor: progress }
+.ghost { font-size: 13px; color: var(--muted); padding: 6px 10px; border-radius: 8px; white-space: nowrap; text-decoration: none }
+.ghost:hover { color: var(--ink); background: var(--accent-soft) }
+.danger:hover { color: var(--err) }
+.muted { color: var(--muted) }
+.small { font-size: 13px }
+.err { color: var(--err); font-size: 14px; margin: 8px 0 0 }
+.label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin: 0 0 6px }
+.empty { color: var(--muted); padding: 40px 0; text-align: center }
+
+/* ---------- app shell ---------- */
+.nav { display: flex; align-items: center; gap: 4px; padding: 10px 16px; border-bottom: 1px solid var(--line); min-height: 56px }
+.brand { font-weight: 600; font-size: 16px; letter-spacing: -.01em; margin-right: 12px; color: var(--ink); text-decoration: none; white-space: nowrap }
+.navlink { font-size: 14px; color: var(--muted); text-decoration: none; padding: 6px 10px; border-radius: 8px; white-space: nowrap }
+.navlink:hover { color: var(--ink) }
+.navlink.active { color: var(--ink); background: var(--accent-soft); font-weight: 500 }
+.nav .who { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); min-width: 0 }
+.nav .who .email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+
+/* ---------- paper search ---------- */
+.wrap { max-width: 640px; margin: 0 auto; padding: clamp(32px, 9vh, 88px) 16px 64px }
+.hero h1 { font-size: 22px; font-weight: 600; letter-spacing: -.015em; margin: 0 }
+.lede { color: var(--muted); font-size: 15px; margin: 2px 0 28px }
+.box { background: var(--field); border: 1px solid var(--line); border-radius: 14px; transition: border-color .15s }
+.box:focus-within { border-color: var(--accent) }
+.box.drag { border-color: var(--accent); border-style: dashed; background: var(--accent-soft) }
+.box textarea { border: 0; background: transparent; resize: none; padding: 14px 16px 4px; min-height: 54px; border-radius: 14px }
+.row { display: flex; align-items: center; gap: 6px; padding: 6px 8px 8px }
+.row .btn { margin-left: auto }
+.iconbtn { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; color: var(--muted) }
+.iconbtn:hover { color: var(--ink); background: var(--accent-soft) }
+.chip { display: inline-flex; align-items: center; gap: 6px; max-width: 60%; font-size: 13px; background: var(--accent-soft); border-radius: 8px; padding: 4px 6px 4px 10px }
+.chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.chip small { color: var(--muted); flex: none }
+.opts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin: 10px 4px 0; font-size: 13px; color: var(--muted) }
+.opts label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer }
+.opts input { accent-color: var(--accent); margin: 0 }
+.opts select { width: auto; border: 0; padding: 0; background: transparent; cursor: pointer }
+.try { margin-left: auto }
+.try button { color: var(--muted); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px }
+.try button:hover { color: var(--ink); text-decoration-color: currentColor }
+.result { margin-top: 44px }
+.footer { margin-top: 72px; font-size: 12px; color: var(--faint) }
+
+/* ---------- answers ---------- */
+.status { font-size: 13px; color: var(--faint); margin: 0 0 8px }
+.answer { font-size: 17px; line-height: 1.7; overflow-wrap: anywhere }
+.answer p { margin: 0 0 .9em }
+.cite { font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 0 5px; margin: 0 1px; vertical-align: .2em; line-height: 1.5 }
+.cite:hover { background: var(--accent); color: var(--accent-ink) }
+.claim.uncited { text-decoration: underline dotted var(--faint); text-underline-offset: 4px; cursor: help }
+.claim.unsupported { text-decoration: underline wavy var(--warn); text-underline-offset: 4px; text-decoration-thickness: 1px; cursor: help }
+.evidence, .note { font-size: 13px; color: var(--muted); margin: 0 0 6px }
+.evidence .flag { color: var(--warn) }
+.sources { margin-top: 28px }
+.sources-toggle { font-size: 13px; color: var(--faint) }
+.sources-toggle:hover { color: var(--ink) }
+.srcs { list-style: none; margin: 4px 0 0; padding: 0 }
+.src { display: grid; grid-template-columns: 22px 1fr; gap: 0 8px; padding: 12px 8px; margin: 0 -8px; border-radius: 10px; border-top: 1px solid var(--line); transition: background .3s }
+.src:first-child { border-top: 0 }
+.src.flash { background: var(--accent-soft) }
+.src .n { font-size: 13px; color: var(--faint); padding-top: 1px }
+.src .t { font-weight: 500; color: var(--ink); text-decoration: none; overflow-wrap: anywhere }
+.src a.t:hover { color: var(--accent) }
+.src .meta { display: block; font-size: 13px; color: var(--muted) }
+.src details { margin-top: 4px; font-size: 14px }
+.src summary { cursor: pointer; color: var(--faint); font-size: 13px; width: fit-content }
+.src summary:hover { color: var(--ink) }
+.src details p { margin: 6px 0 0; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere }
+.skel { height: 12px; border-radius: 6px; background: var(--line); margin: 0 0 12px; animation: pulse 1.2s ease-in-out infinite }
+@keyframes pulse { 50% { opacity: .4 } }
+
+/* ---------- sign in ---------- */
+.center { max-width: 400px; margin: clamp(40px, 12vh, 112px) auto; padding: 0 16px }
+.center h1 { font-size: 22px; font-weight: 600; letter-spacing: -.015em; margin: 0 0 4px }
+.stack { display: grid; gap: 10px; margin-top: 20px }
+
+/* ---------- workspace ---------- */
+.ws { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: calc(100vh - 56px) }
+.ws aside { border-right: 1px solid var(--line); padding: 16px; display: flex; flex-direction: column; gap: 16px; min-width: 0 }
+.ws main { padding: 24px clamp(16px, 4vw, 48px) 0; min-width: 0; display: flex; flex-direction: column }
+.inner { max-width: 720px; width: 100%; margin: 0 auto; flex: 1; display: flex; flex-direction: column }
+.side-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px }
+.side-head .label { margin: 0 }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px }
+.tab { font-size: 14px; padding: 6px 12px; border-radius: 8px; color: var(--muted); text-decoration: none }
+.tab.active { background: var(--accent-soft); color: var(--ink); font-weight: 500 }
+.convs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; overflow-y: auto }
+.conv { display: block; padding: 7px 10px; border-radius: 8px; text-decoration: none; color: var(--ink) }
+.conv:hover { background: var(--accent-soft) }
+.conv.active { background: var(--accent-soft); font-weight: 500 }
+.conv .t { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px }
+.conv .d { display: block; font-size: 12px; color: var(--faint); font-weight: 400 }
+.privacy { font-size: 12px; color: var(--faint); margin: auto 0 0 }
+
+.page-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px }
+.page-head h1 { font-size: 18px; font-weight: 600; margin: 0; min-width: 0; overflow-wrap: anywhere }
+.page-head .ghost { margin-left: auto }
+.thread { flex: 1 }
+.turn { margin-bottom: 36px }
+.turn .q { font-weight: 600; margin: 0 0 6px; overflow-wrap: anywhere }
+.turn .answer { font-size: 16px }
+.composer { position: sticky; bottom: 0; background: var(--bg); padding: 12px 0 16px; border-top: 1px solid var(--line) }
+.composer textarea { resize: vertical }
+.composer .row { padding: 8px 0 0; gap: 12px; flex-wrap: wrap }
+.composer label { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; cursor: pointer }
+.composer input[type=checkbox] { accent-color: var(--accent); margin: 0 }
+
+.drop { border: 1px dashed var(--line); border-radius: 14px; padding: 28px 16px; text-align: center; color: var(--muted); background: var(--field); transition: border-color .15s, background .15s; margin-top: 8px }
+.drop.drag { border-color: var(--accent); background: var(--accent-soft) }
+.linkbtn { color: var(--accent); text-decoration: underline; text-underline-offset: 3px }
+table.list { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px }
+table.list th { text-align: left; font-size: 12px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; padding: 0 8px 6px }
+table.list td { border-top: 1px solid var(--line); padding: 10px 8px; vertical-align: middle }
+table.list td:first-child { overflow-wrap: anywhere }
+table.list td.actions { text-align: right; white-space: nowrap }
+table.list select { width: auto; padding: 4px 8px }
+.pill { font-size: 12px; border-radius: 999px; padding: 1px 8px; background: var(--accent-soft); white-space: nowrap }
+.pill.ready, .pill.active { color: var(--ok) }
+.pill.failed, .pill.revoked { color: var(--err) }
+.inline-form { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px }
+.inline-form input { flex: 1 1 220px; width: auto }
+.inline-form select { width: auto }
+.callout { border: 1px solid var(--line); background: var(--accent-soft); border-radius: 12px; padding: 12px 14px; margin-top: 16px; font-size: 14px }
+.callout code { display: block; margin: 8px 0; padding: 8px 10px; background: var(--field); border-radius: 8px; overflow-wrap: anywhere; user-select: all }
+
+.modal { position: fixed; inset: 0; background: rgb(0 0 0 / .4); display: grid; place-items: center; padding: 16px; z-index: 10 }
+.modal form { background: var(--field); border: 1px solid var(--line); border-radius: 14px; padding: 20px; width: min(400px, 100%) }
+.modal h2 { margin: 0 0 4px; font-size: 16px }
+.modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px }
+
+@media (max-width: 760px) {
+  .ws { grid-template-columns: 1fr }
+  .ws aside { border-right: 0; border-bottom: 1px solid var(--line) }
+  .convs { max-height: 180px }
+  .hide-sm { display: none }
+  .nav .who .email { display: none }
+  .try { margin-left: 0; width: 100% }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skel { animation: none }
+  .src, .box, .drop { transition: none }
+}

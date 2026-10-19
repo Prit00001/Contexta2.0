@@ -27,6 +27,9 @@ from services.arxiv_client import ArxivClient
 from services.search_service import SearchService
 
 STATIC = Path(__file__).parent / "static"
+# The React app (frontend/, `pnpm build`). When it isn't built - e.g. a Python-only dev setup - the
+# original static pages in app/static are served instead.
+FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 log = logging.getLogger("contexta")
 
 
@@ -117,13 +120,25 @@ def create_app(http_transport: httpx.AsyncBaseTransport | None = None) -> FastAP
     app.include_router(workspace_router)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
-    @app.get("/", include_in_schema=False)
-    async def index():
-        return FileResponse(STATIC / "index.html")
+    if (FRONTEND_DIST / "index.html").exists():
+        app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+        spa = FRONTEND_DIST / "index.html"
 
-    @app.get("/workspace", include_in_schema=False)
-    async def workspace_page():
-        return FileResponse(STATIC / "workspace.html")
+        @app.get("/", include_in_schema=False)
+        @app.get("/workspace", include_in_schema=False)
+        @app.get("/workspace/{_path:path}", include_in_schema=False)
+        async def spa_page(_path: str = ""):
+            return FileResponse(spa)  # client-side routing (react-router) takes it from here
+
+    else:
+
+        @app.get("/", include_in_schema=False)
+        async def index():
+            return FileResponse(STATIC / "index.html")
+
+        @app.get("/workspace", include_in_schema=False)
+        async def workspace_page():
+            return FileResponse(STATIC / "workspace.html")
 
     return app
 

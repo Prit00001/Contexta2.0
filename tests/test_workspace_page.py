@@ -2,14 +2,30 @@
 
 from fastapi.testclient import TestClient
 
+import app.main as app_main
 from app.config import get_settings
 from app.main import create_app
 
 
-def test_workspace_page_is_served():
+def test_static_pages_are_served_when_the_react_app_is_not_built(monkeypatch, tmp_path):
+    monkeypatch.setattr(app_main, "FRONTEND_DIST", tmp_path / "missing")
     with TestClient(create_app()) as c:
-        r = c.get("/workspace")
-    assert r.status_code == 200 and "Contexta Workspace" in r.text
+        assert "Contexta Workspace" in c.get("/workspace").text
+        assert "Cited answers from ML/NLP papers" in c.get("/").text
+
+
+def test_react_app_is_served_for_its_routes(monkeypatch, tmp_path):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text("<div id=root>spa</div>")
+    (tmp_path / "assets" / "app.js").write_text("console.log(1)")
+    monkeypatch.setattr(app_main, "FRONTEND_DIST", tmp_path)
+    with TestClient(create_app()) as c:
+        for path in ("/", "/workspace", "/workspace/abc/ask/def"):
+            r = c.get(path)
+            assert r.status_code == 200 and "spa" in r.text, path
+        assert c.get("/assets/app.js").text == "console.log(1)"
+        assert c.get("/health").json()["status"]  # API routes are not swallowed by the SPA
+        assert c.get("/workspaces").status_code in (401, 503)
 
 
 def test_auth_config_without_database_or_sign_in(monkeypatch):
