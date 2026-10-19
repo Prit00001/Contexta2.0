@@ -1,45 +1,29 @@
-# arXiv snapshot — not yet fetched
+# arXiv snapshot
 
-`eval/dataset/arxiv_snapshot.jsonl` is currently empty. A frozen arXiv snapshot lets `eval/run_eval.py`
-include arXiv-sourced candidates without results drifting between runs (live arXiv search changes over
-time). It needs to be fetched once, from a machine that can actually reach `export.arxiv.org` -
-unreachable from the sandbox this dataset was drafted in (see `docs/testing/TEST_REPORT.md` §5, B-2).
+`eval/dataset/arxiv_snapshot.jsonl` freezes live arXiv results for every question in
+`questions.jsonl`, so `eval/run_eval.py --arxiv` can measure `/ask`'s default path (library + arXiv)
+deterministically — live search results drift over time.
 
-## Format
-
-One JSON object per line, matching `services.arxiv_client.ArxivClient.parse()`'s output shape exactly:
+- Fetched 2026-10-19 from `export.arxiv.org` with `scripts/fetch_arxiv_snapshot.py`: 143 questions,
+  12 papers each (1,716 entries), no failed queries.
+- Each line is one question:
 
 ```json
-{"id": "arxiv_1706.03762", "source": "arxiv", "title": "...", "url": "https://arxiv.org/abs/1706.03762", "text": "Title. Summary...", "authors": ["..."], "published": "2017-06-12"}
+{"question_id": "q001", "query": "all:recurrence OR all:convolution OR …", "fetched_at": "2026-10-19",
+ "papers": [{"id": "arxiv_1706.03762", "source": "arxiv", "title": "…", "url": "https://arxiv.org/abs/1706.03762v7",
+             "text": "Title. Summary…", "authors": ["…"], "published": "2017-06-12"}]}
 ```
 
-## How to fetch it
+`query` is exactly what `services.arxiv_client.ArxivClient.build_query()` sends for that question;
+the replay (`SnapshotArxiv` in `eval/run_eval.py`) looks papers up by it. `papers` is the parsed
+`ArxivClient.parse()` output.
 
-From a machine with network access:
+Gold labels stay library document IDs. A library paper that comes back through its arXiv copy (e.g.
+LoRA, `doc_009` = arXiv 2106.09685) is mapped back to its library ID before scoring
+(`library_arxiv_ids()`), so it still counts as the gold paper. Other arXiv papers are never gold — the
+dataset has no arXiv-only gold labels — so for `unanswerable` questions an arXiv paper may in fact
+answer the question; abstention numbers on the arXiv path need that caveat.
 
-```python
-import asyncio, json, httpx
-from services.arxiv_client import ArxivClient
+Refresh (appends missing questions; delete the file first for a full refetch):
 
-
-async def main():
-    async with httpx.AsyncClient() as client:
-        arxiv = ArxivClient(client)
-        # run one search per topic you want snapshotted, e.g. the keywords behind
-        # eval/dataset/questions.jsonl's comparison/paraphrase questions
-        papers = await arxiv.search("retrieval augmented generation")
-        with open("eval/dataset/arxiv_snapshot.jsonl", "a") as f:
-            for p in papers:
-                f.write(json.dumps(p) + "\n")
-
-
-asyncio.run(main())
-```
-
-Dedupe by `id` afterward if you run multiple searches.
-
-## Until it's populated
-
-`eval/dataset/questions.jsonl`'s `comparison` and `paraphrase` questions are scoped to the local 25-paper
-library only (`data/documents.py`) - none of them depend on arXiv-only coverage. The eval harness's default
-offline run doesn't need this file at all; it only matters once arXiv-sourced retrieval is being measured.
+    PYTHONPATH=. python scripts/fetch_arxiv_snapshot.py
