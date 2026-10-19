@@ -125,6 +125,9 @@ class Settings(BaseModel):
     storage_bucket: str = "documents"
     supabase_url: str = ""
     supabase_service_key: str = Field("", repr=False)
+    # Public client key (safe to expose - RLS and the API's own checks still apply): lets /workspace
+    # sign users in with email + password. Unset: the page asks for an access token instead.
+    supabase_anon_key: str = ""
     max_upload_mb: float = Field(20.0, gt=0, le=200)
     supabase_jwt_secret: str = Field("", repr=False)
     redis_url: str = Field("", repr=False)

@@ -323,6 +323,22 @@ class AddMemberRequest(BaseModel):
     role: str = Field("member", pattern="^(admin|member|viewer)$")
 
 
+class WorkspaceOut(BaseModel):
+    workspace_id: str
+    name: str
+    role: str
+    org_id: str
+
+
+class AuthConfig(BaseModel):
+    """What the /workspace page needs to sign users in. Only public values."""
+
+    workspaces_enabled: bool
+    supabase_url: Optional[str] = None
+    supabase_anon_key: Optional[str] = None
+    history_retention_days: int
+
+
 class MemberOut(BaseModel):
     user_id: str
     role: str

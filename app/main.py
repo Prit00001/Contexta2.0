@@ -121,6 +121,10 @@ def create_app(http_transport: httpx.AsyncBaseTransport | None = None) -> FastAP
     async def index():
         return FileResponse(STATIC / "index.html")
 
+    @app.get("/workspace", include_in_schema=False)
+    async def workspace_page():
+        return FileResponse(STATIC / "workspace.html")
+
     return app
 
 

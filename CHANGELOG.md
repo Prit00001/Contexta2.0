@@ -2,6 +2,13 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Workspace UI (2026-10-19)
+
+### Added
+- `/workspace` page (`app/static/workspace.html`, no build step, same design tokens as the main page): sign in, pick or create a workspace, upload / delete documents with live ingestion status, ask questions with a sidebar of saved conversations (open, continue, delete; shows when a thread will be deleted). Role-aware: viewers can ask but not change documents. Linked from the main page footer.
+- `GET /workspaces` (the signed-in user's workspaces and roles) and `GET /auth/config` (public sign-in settings for the page).
+- `SUPABASE_ANON_KEY`: enables email + password sign-in on the page; without it the page accepts a pasted access token.
+
 ## [Unreleased] — Stored workspace conversations (P2-14) (2026-10-19)
 
 ### Added

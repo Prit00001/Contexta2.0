@@ -742,7 +742,8 @@
 
     fetch('/health').then((r) => r.json()).then((h) => {
       $('foot').textContent = `${h.index_size} library papers · ` +
-        (h.llm_providers.length ? h.llm_providers.join(' → ') : 'no AI model configured');
+        (h.llm_providers.length ? h.llm_providers.join(' → ') : 'no AI model configured') + ' · ';
+      $('foot').insertAdjacentHTML('beforeend', '<a href="/workspace" style="color:inherit">Your workspace</a>');
     }).catch(() => { });
   </script>
 </body>

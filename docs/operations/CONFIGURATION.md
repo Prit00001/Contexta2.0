@@ -80,6 +80,7 @@ Traced (`TRACING_ENABLED=true`): FastAPI's own server span (method, route, `url.
 | `DATABASE_URL` | – | Postgres with pgvector. Unset → workspace routes return 503. Unreachable at startup → public API still starts, `/ready` shows `database: unreachable` |
 | `SUPABASE_JWT_SECRET` | – | Required for workspace auth; unset → workspace JWT routes return 503 |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | – | Member lookup; Supabase storage |
+| `SUPABASE_ANON_KEY` | – | Supabase's public client key. With `SUPABASE_URL`, the `/workspace` page signs users in with email + password; without it, the page asks for a pasted access token (local/dev). Served by `GET /auth/config` (public by design; the service key and JWT secret never are) |
 | `STORAGE_BACKEND` | `local` | `local` or `supabase` (requires the two above) |
 | `STORAGE_DIR` | `.storage` | Local backend root |
 | `STORAGE_BUCKET` | `documents` | Supabase bucket |

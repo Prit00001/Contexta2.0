@@ -94,6 +94,13 @@ def _ask(c, ws, user, **body):
                   headers=_auth(user))  # fmt: skip
 
 
+def test_list_my_workspaces(workspace):
+    c, ws, users, _ = workspace
+    (mine,) = [w for w in c.get("/workspaces", headers=_auth(users["member"])).json() if w["workspace_id"] == ws]
+    assert mine["role"] == "member" and mine["name"] == "HQ"
+    assert c.get("/workspaces", headers={"Authorization": "Bearer not-a-jwt"}).status_code == 401
+
+
 def test_save_follow_up_read_and_delete(workspace):
     c, ws, users, _ = workspace
     owner = users["owner"]

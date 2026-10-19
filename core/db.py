@@ -185,6 +185,16 @@ def list_memberships(conn, workspace_id: str):
         return cur.fetchall()
 
 
+def user_workspaces(conn, user_id: str):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT w.id, w.name, m.role, w.org_id FROM memberships m JOIN workspaces w ON w.id = m.workspace_id "
+            "WHERE m.user_id = %s ORDER BY w.name",
+            (user_id,),
+        )
+        return cur.fetchall()
+
+
 def visible_group_ids(conn, user_id: str):
     with conn.cursor() as cur:
         cur.execute("SELECT group_id FROM access_group_members WHERE user_id=%s", (user_id,))
