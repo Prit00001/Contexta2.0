@@ -26,6 +26,7 @@ import argparse
 import asyncio
 import json
 import math
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -106,10 +107,43 @@ def ndcg_at_k(ranked_ids: list[str], gold: set[str], k: int) -> float:
 
 
 DEFAULT_RERANK_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"  # also Settings.rerank_model's default
+ARXIV_SNAPSHOT = ROOT / "dataset" / "arxiv_snapshot.jsonl"
+_ARXIV_ABS = re.compile(r"arxiv\.org/abs/([\w.\-/]+?)(v\d+)?/?$")
+
+
+class SnapshotArxiv:
+    """Replays eval/dataset/arxiv_snapshot.jsonl (scripts/fetch_arxiv_snapshot.py) in place of live
+    arXiv, so arXiv-mixed retrieval - /ask's real default path - is measured deterministically."""
+
+    def __init__(self, path: Optional[Path] = None):
+        path = path or ARXIV_SNAPSHOT
+        rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()] if path.exists() else []
+        if not rows:
+            raise SystemExit(f"--arxiv: {path} is empty; run scripts/fetch_arxiv_snapshot.py first")
+        self.by_query = {r["query"]: r["papers"] for r in rows}
+        self.fetched_at = sorted({r.get("fetched_at", "") for r in rows})
+        self.missing = 0
+
+    async def search(self, question: str) -> list[dict]:
+        papers = self.by_query.get(ArxivClient.build_query(question))
+        if papers is None:
+            self.missing += 1
+            return []
+        return papers
+
+
+def library_arxiv_ids() -> dict[str, str]:
+    """ "arxiv:2106.09685" -> "doc_009": a library paper retrieved through arXiv is still the gold paper."""
+    out = {}
+    for d in DOCUMENTS:
+        m = _ARXIV_ABS.search(d.get("url", ""))
+        if m:
+            out[f"arxiv:{m.group(1)}"] = d["id"]
+    return out
 
 
 async def run_retrieval(
-    questions: list[dict], top_k: int = 10, hybrid_bm25: bool = False, rerank: bool = False
+    questions: list[dict], top_k: int = 10, hybrid_bm25: bool = False, rerank: bool = False, arxiv: bool = False
 ) -> list[dict]:
     settings = get_settings()
     embedder = Embedder(settings.embed_backend, settings.embed_model, settings.model_cache_dir)
@@ -121,10 +155,11 @@ async def run_retrieval(
         if not reranker.available:
             raise SystemExit(f"--rerank: could not load {reranker.model_name} ({reranker.error}); is the network up?")
     retriever = ResearchRetriever(
-        embedder=embedder, library=library, arxiv=None, arxiv_enabled=False,
+        embedder=embedder, library=library, arxiv=SnapshotArxiv() if arxiv else None, arxiv_enabled=arxiv,
         arxiv_budget_s=settings.arxiv_budget_s, min_score=0.0,  # score the full ranking, not just >= MIN_SCORE
         hybrid_bm25_enabled=hybrid_bm25, reranker=reranker, rerank_candidates=settings.rerank_candidates,
     )  # fmt: skip
+    same_paper = library_arxiv_ids()
 
     results = []
     for q in questions:
@@ -132,9 +167,9 @@ async def run_retrieval(
             continue  # no gold to rank against; scored separately under abstention (--with-llm)
         gold = set(q["gold_document_ids"])
         t0 = time.perf_counter()
-        result = await retriever.aretrieve(q["question"], top_k, use_arxiv=False)
+        result = await retriever.aretrieve(q["question"], top_k, use_arxiv=arxiv)
         latency_ms = (time.perf_counter() - t0) * 1000
-        ranked_ids = [s["document_id"] for s in result.sources]
+        ranked_ids = [same_paper.get(s["document_id"], s["document_id"]) for s in result.sources]
         results.append(
             {
                 "id": q["id"],
@@ -147,8 +182,12 @@ async def run_retrieval(
                 "mrr": reciprocal_rank(ranked_ids, gold),
                 "ndcg@10": ndcg_at_k(ranked_ids, gold, 10),
                 "latency_ms": round(latency_ms, 1),
+                # arXiv-only papers (not one of the library's) in the top 5
+                "arxiv_top5": sum(1 for d in ranked_ids[:5] if d.startswith("arxiv:")),
             }
         )
+    if arxiv and retriever.arxiv.missing:
+        print(f"warning: {retriever.arxiv.missing} questions had no arXiv snapshot entry")
     return results
 
 
@@ -179,6 +218,7 @@ def summarize_retrieval(results: list[dict]) -> dict:
         "ndcg@10": _mean([r["ndcg@10"] for r in results]),
         # retrieval-only latency: what reranking (P2-07) and BM25 fusion cost
         "latency_p95_ms": sorted(r["latency_ms"] for r in results)[int(0.95 * (len(results) - 1))] if results else 0.0,
+        "arxiv_share_top5": _mean([r.get("arxiv_top5", 0) / 5 for r in results]),
     }
     return summary
 
@@ -414,7 +454,7 @@ async def main_async(args: argparse.Namespace) -> None:
         print(f"rule: {sweep['rule']}\nWrote {out}")
         return
     retrieval_results = await run_retrieval(
-        questions, top_k=args.top_k, hybrid_bm25=args.hybrid_bm25, rerank=args.rerank
+        questions, top_k=args.top_k, hybrid_bm25=args.hybrid_bm25, rerank=args.rerank, arxiv=args.arxiv
     )
     report: dict = {
         "n_questions": len(questions),
@@ -446,6 +486,11 @@ def main() -> None:
     parser.add_argument("--with-llm", action="store_true", help="also run answer-quality metrics (real API calls)")
     parser.add_argument(
         "--rerank", action="store_true", help="cross-encoder reranking (P2-07); downloads ~80 MB the first time"
+    )
+    parser.add_argument(
+        "--arxiv",
+        action="store_true",
+        help="mix in arXiv results from eval/dataset/arxiv_snapshot.jsonl (/ask's default)",
     )
     parser.add_argument("--hybrid-bm25", action="store_true", help="RRF-fuse a BM25 ranking in (P2-FR-03)")
     parser.add_argument(
