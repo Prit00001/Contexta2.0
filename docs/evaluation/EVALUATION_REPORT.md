@@ -233,11 +233,15 @@ fixes were verified with `GROQ_MODEL=openai/gpt-oss-120b` on a fixed sample
 (`--sample "single_fact:3,paraphrase:3,comparison:3,unanswerable:33"`). Different model from run 1 —
 compare outcomes, not absolute quality. 0 rate-limited items.
 
-| | Run 1 (20b, before) | Run 2 (120b, after) |
-|---|---|---|
-| Unanswerable correctly abstained | 2 / 33 (0.06) | **31 / 33 (0.94)** — 29 by the LLM (`validate_answer: abstained`), 2 at retrieval |
-| Unanswerable shown as extractive quotes | 28 / 33 | 1 / 33 |
-| Answerable answered (sample of 9) | 9 / 9 | 9 / 9, citation precision 1.00, all first attempt |
+| | Run 1 (20b, before) | Run 2 (120b, after) | **Run 3 (20b, after — like for like)** |
+|---|---|---|---|
+| Unanswerable correctly abstained | 2 / 33 (0.06) | 31 / 33 (0.94) | **31 / 33 (0.94)** — 29 by the LLM, 2 at retrieval |
+| Unanswerable shown as extractive quotes | 28 / 33 | 1 / 33 | **0 / 33** |
+| Answerable answered (sample of 9) | 9 / 9 | 9 / 9, precision 1.00 | **9 / 9, precision 1.00, all first attempt** |
+
+Run 3 (2026-10-19, after the gpt-oss-20b daily quota reset) repeats run 1's model and settings
+(`RERANK_MODEL=none`, `MIN_SCORE=0.2`, no claim check) on the same sample, so the fixes are the only
+difference. 0 rate-limited items.
 
 Run 2 first exposed a second bug: gpt-oss-120b cites as `【1】`, which the marker parser didn't
 recognise, so 2 of 9 correctly cited answers were rejected as uncited. Fixed in `core/citations.py`
