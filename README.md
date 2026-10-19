@@ -43,7 +43,7 @@ FastAPI · LangGraph · LangChain · FAISS · fastembed (all-MiniLM-L6-v2, ONNX)
 | Feature | Notes |
 |---|---|
 | Query rewriting | `QUERY_REWRITE=single|multi|decompose|selective` — the research brief's conditions 1–5 as a `rewrite` node in the graph; one LLM call max, original query kept (except `single`), rewrites shown in `query_rewrites` and the UI. [ADR-004](docs/decisions/ADR-004-query-rewriting.md) |
-| Local rewriter | `REWRITE_PROVIDERS=custom` + `LLM_BASE_URL` → rewrite with a local Ollama model, answer with the hosted chain (condition 6) |
+| Local rewriter | `REWRITE_PROVIDERS=custom` + `LLM_BASE_URL` → rewrite with a local Ollama model, answer with the hosted chain (condition 6). Measured: qwen2.5:7b on CPU ≈ hosted quality, 4–10 s per rewrite; use a GPU or a hosted model |
 | Comparison harness | `PYTHONPATH=. python eval/run_eval.py --rewrite all` — measured with gpt-oss-120b: `decompose` R@1 0.711 → 0.765, R@5 0.977 → 0.992 for one LLM call; `single` best on paraphrase (R@1 0.72 → 0.82). Default stays `off` (owner decision). EVALUATION_REPORT §5f |
 
 Verified for real on 2026-10-18/19: Groq LLM answers, the MiniLM and reranker downloads, and the Docker image (built and run with no network). Live arXiv is still only tested through mocks. See [Known limitations](#known-limitations).
@@ -224,7 +224,7 @@ Current: **241 passed** (Python 3.13, with Postgres 16 + pgvector and a local `r
 
 - **Decided 2026-10-19** — reranking on by default; query rewriting stays off (on top of reranking, `decompose` adds only +0.03 R@1 for an LLM call per question; opt in with `QUERY_REWRITE=decompose` or `selective`). Still the owner's: server-side conversation history for workspaces.
 - **Phase 2, still open** — human review of the eval set and labelling `docs/evaluation/claims_to_label.csv` (measures the claim checker); later: React frontend: [PHASE_2_BACKLOG](docs/roadmap/PHASE_2_BACKLOG.md)
-- **Phase 3** — conditions 1–5 measured ([ADR-004 Results](docs/decisions/ADR-004-query-rewriting.md)): H1 half supported, H2–H4 not as stated; still open: H5 (local Ollama rewriter) and rerank + rewrite combined: [research brief](docs/research/PHASE_3_QUERY_REWRITING_RESEARCH.md)
+- **Phase 3 — done.** All six conditions measured ([ADR-004 Results](docs/decisions/ADR-004-query-rewriting.md)): rewriting stays off by default; local rewriting (Ollama qwen2.5:7b) is close in quality but ~10× slower on CPU (EVALUATION_REPORT §5h)
 
 ## Project layout
 

@@ -72,7 +72,7 @@ LLM-drafted and unreviewed.
 | **H2** multi + fusion dominates single | **Not supported** on clean data | multi R@1 0.747 vs single 0.779; but under decoys multi is far more robust (decoy win 0.355 vs off 0.918) because the original query stays in the fusion |
 | **H3** only decompose materially improves comparison | **Not supported** | comparison R@5 is already 0.984 at baseline; every mode leaves it within ±0.01 (decompose 0.974), R@1 +0.03 for multi and decompose alike |
 | **H4** selective gets ≥70% of the best gain with ≤40% of the calls | **Not supported at the default gap; nearly at 0.45** | gap 0.35 fires on 18% and gains R@1 +0.009 (13% of single's +0.068). Simulated from the measured rankings: gap 0.45 fires on 38% and reaches R@1 0.756 (+0.045, 66%) — more than `multi` rewriting everything (0.747) |
-| **H5** a local 7–8B model is within a few points of a hosted one | **Not tested** | no Ollama in the environment. The gpt-oss-20b run was invalidated by rate limits, so no small-vs-large comparison either |
+| **H5** a local 7–8B model is within a few points of a hosted one, but slower on CPU | **Partly supported** (2026-10-19, EVALUATION_REPORT §5h) | qwen2.5:7b via Ollama, CPU-only: best R@1 0.747 (`multi`) vs 0.779 hosted (`single`); with reranking 0.802 vs 0.811; 5 unusable outputs in 429 calls. ~10× slower (p50 6.4 s vs 0.6 s). qwen2.5:1.5b gives no gain and fails ~11% of `single`/`decompose` calls |
 
 Decision against the PRD adoption rule (beats `off` overall, no type loses >0.02 R@5, no drop in
 unanswerable abstention):

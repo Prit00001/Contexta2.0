@@ -2,6 +2,11 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Phase 3 H5: local rewriter (2026-10-19)
+
+### Added
+- EVALUATION_REPORT §5h: Ollama qwen2.5:1.5b and qwen2.5:7b (CPU-only) vs hosted gpt-oss-120b as the query rewriter, all modes, plain and reranked retrieval. H5 partly supported; ADR-004 and the research brief updated. Phase 3 is complete.
+
 ## [Unreleased] — Library + arXiv path (2026-10-19)
 
 ### Added

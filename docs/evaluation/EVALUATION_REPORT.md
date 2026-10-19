@@ -353,6 +353,42 @@ put the library papers first with recent arXiv work after them; a topic the libr
 (speculative decoding) is answered entirely from arXiv; reranking 130–200 ms, total 2.6–3.2 s
 (4.2–5.5 s before).
 
+## 5h. Phase 3 H5 — local rewriter (Ollama) vs hosted (2026-10-19)
+
+`REWRITE_PROVIDERS=custom` against Ollama 0.40.6 in Docker on this sandbox (4 CPU cores, 15.7 GiB RAM,
+**no GPU** — Ollama reported `inference compute: cpu`), `--rewrite all --retrievers hybrid,hybrid_rerank`,
+all 143 questions, library-only, MiniLM. Hosted reference: Groq `gpt-oss-120b` (§5f). "Fails" = the
+rewrite was unusable (invalid JSON, or only the original question echoed back) and retrieval fell back
+to the question.
+
+Overall R@1 (hybrid / hybrid + rerank; `off` = 0.711 / 0.783):
+
+| Rewriter | single | multi | decompose | selective* | fails (single / multi / decompose) | rewrite p50 / p95 |
+|---|---|---|---|---|---|---|
+| qwen2.5:1.5b (986 MB) | 0.715 / **0.802** | 0.720 / 0.779 | 0.697 / 0.742 | 0.720 / 0.779 | 17 / 0 / 14 of 143 | 1.0–2.8 s / ~4.0 s |
+| qwen2.5:7b (4.7 GB) | 0.711 / 0.747 | **0.747 / 0.802** | 0.742 / 0.756 | 0.752 / 0.779 | 4 / 0 / 1 | 3.9–6.4 s / 8.3–10.0 s |
+| gpt-oss-120b (Groq) | **0.779** / 0.783 | 0.747 / 0.797 | 0.765 / **0.811** | 0.720 / 0.783 | 0 / 0 / 0 | 0.5–0.6 s / 0.7–0.9 s |
+
+\* selective fired on 38% of questions for the local runs (`REWRITE_GAP_SCORE` 0.45) and 18% for the
+hosted run (0.35, before the default changed) — not directly comparable.
+
+Paraphrase R@1 (hybrid; `off` 0.718): 1.5b 0.692–0.744, 7b up to **0.821** (multi), 120b up to **0.821**
+(single, decompose). R@5 stayed within 0.96–0.99 for every model and mode.
+
+Reading:
+- **H5 is partly supported.** The 7B model's best mode (`multi`: R@1 0.747, paraphrase 0.821) is within
+  ~3 points of the hosted model's best on the plain retriever (`single` 0.779) and ties it with
+  reranking (0.802 vs 0.811). JSON was reliable (5 unusable of 429 calls). But on CPU it is **~10× slower**
+  (p50 6.4 s vs 0.6 s for `multi`), which rules it out for interactive use without a GPU.
+- **The 1.5B model does not help on its own.** Its rewrites are close to the question or echo it back
+  (31 unusable of 286 `single`/`decompose` calls), and `decompose` with it is *worse* than no rewriting
+  (R@1 0.697). Its odd `single` + rerank result (0.802) is a single configuration on an unreviewed set.
+- **Memory:** the Ollama container held ~6.6 GiB with the 1.5B model loaded and ~10 GiB with the 7B
+  (resident 5.2 GB), against the 512 MB tier the hosted deployment targets. Local rewriting is a
+  self-hosting option only, as the brief anticipated (§4).
+- **Recommendation:** keep rewriting off by default (§5f/ADR-004). Anyone who enables it should use a
+  hosted model, or a local ≥7B model on a GPU; a CPU-only 7B adds 4–10 s per question.
+
 ## 6. Known limitations of this dataset
 
 - Unreviewed (see §1) — treat as provisional.
