@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 from string import Template
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from data.documents import DOCUMENTS
 
@@ -206,10 +210,61 @@ def _shell(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
+_CANONICAL = re.compile(r'\s*<link rel="canonical"[^>]*>')
+_TITLE = re.compile(r"<title>.*?</title>", re.S)
+
+
 def render_shell(request: Request, index_html: Path) -> HTMLResponse:
-    """The built index.html with absolute URLs filled in. Workspace pages are private: noindex."""
+    """The built index.html with absolute URLs filled in. Workspace pages are private: noindex, their
+    own title, and no canonical (a canonical pointing at / beside noindex sends mixed signals)."""
     base = site_url(request)
     page = _shell(str(index_html)).replace("__SITE_URL__", html.escape(base))
     page = page.replace("__APP_LD__", app_json_ld(base))
-    headers = {"X-Robots-Tag": "noindex"} if request.url.path.startswith("/workspace") else {}
-    return HTMLResponse(page, headers=headers)
+    if not request.url.path.startswith("/workspace"):
+        return HTMLResponse(page)
+    page = _CANONICAL.sub("", page, count=1)
+    page = _TITLE.sub("<title>Workspace \u00b7 Contexta</title>", page, count=1)
+    return HTMLResponse(page, headers={"X-Robots-Tag": "noindex"})
+
+
+# ---- not found, permanent redirects ----
+
+_NOT_FOUND = (Path(__file__).parent / "templates" / "404.html").read_text(encoding="utf-8")
+
+
+async def not_found_handler(request: Request, exc: StarletteHTTPException):
+    """An unknown address opened in a browser gets a real 404 page; API clients keep the JSON error.
+    Only for "no such route": a 404 an endpoint raises on purpose ("document not found") stays JSON."""
+    unknown_route = exc.status_code == 404 and exc.detail == "Not Found"
+    if unknown_route and request.method in ("GET", "HEAD") and "text/html" in request.headers.get("accept", ""):
+        return HTMLResponse(_NOT_FOUND, status_code=404, headers={"X-Robots-Tag": "noindex"})
+    return await http_exception_handler(request, exc)  # FastAPI's own JSON error, unchanged
+
+
+class PermanentRedirects:
+    """301s for addresses that have a single proper form, so search engines merge them:
+    /about/ -> /about, and www.<site> <-> <site> (whichever APP_SITE_URL names).
+    GET/HEAD only: a POST to a redirected address would lose its body."""
+
+    def __init__(self, app: ASGIApp, site_url: str):
+        self.app = app
+        host = site_url.split("://", 1)[-1].split("/", 1)[0].lower()
+        self.canonical_host = "" if any(h in host for h in _LOCAL) else host
+        self.scheme = site_url.split("://", 1)[0] if "://" in site_url else "https"
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["method"] not in ("GET", "HEAD"):
+            return await self.app(scope, receive, send)
+        path, query = scope["path"], scope.get("query_string", b"").decode("latin-1")
+        host = next((v.decode("latin-1").lower() for k, v in scope["headers"] if k == b"host"), "")
+        target = None
+        c = self.canonical_host
+        if c and host and host != c and (host == f"www.{c}" or c == f"www.{host}"):
+            target = f"{self.scheme}://{c}{path}"
+        elif len(path) > 1 and path.endswith("/"):
+            target = path.rstrip("/") or "/"
+        if target is None:
+            return await self.app(scope, receive, send)
+        if query:
+            target += f"?{query}"
+        await RedirectResponse(target, status_code=301)(scope, receive, send)

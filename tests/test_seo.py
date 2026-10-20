@@ -104,3 +104,52 @@ def test_json_ld_cannot_close_its_script_element():
 def test_public_pages_answer_head_requests(client):
     for path in ("/robots.txt", "/sitemap.xml", "/llms.txt", "/about"):
         assert client.head(path).status_code == 200, path
+
+
+# ---- link previews, 404 page, permanent redirects, private pages ----
+
+
+def test_both_public_pages_carry_a_link_preview_image(client):
+    page = client.get("/about").text
+    assert '<meta property="og:image" content="https://contexta.example.com/static/og.png">' in page
+    assert '<meta name="twitter:card" content="summary_large_image">' in page
+    img = client.get("/static/og.png")
+    assert img.status_code == 200 and img.headers["content-type"] == "image/png"
+    assert img.content[16:24] == (1200).to_bytes(4, "big") + (630).to_bytes(4, "big")  # PNG IHDR width, height
+
+
+def test_unknown_address_gets_a_404_page_in_browsers_and_json_elsewhere(client):
+    browser = client.get("/no-such-page", headers={"accept": "text/html,application/xhtml+xml"})
+    assert browser.status_code == 404 and "This page doesn't exist" in browser.text
+    assert browser.headers["x-robots-tag"] == "noindex"
+    api = client.get("/no-such-page", headers={"accept": "application/json"})
+    assert api.status_code == 404 and api.json() == {"detail": "Not Found"}
+
+
+def test_a_deliberate_404_from_an_endpoint_stays_json_for_browsers_too(client):
+    r = client.get("/cron/maintenance", headers={"accept": "text/html"})  # 404 "Not found." when no CRON_SECRET
+    assert r.status_code == 404 and r.headers["content-type"].startswith("application/json")
+
+
+def test_trailing_slash_and_www_redirect_permanently(client):
+    r = client.get("/about/?ref=x", follow_redirects=False)
+    assert r.status_code == 301 and r.headers["location"] == "/about?ref=x"
+    r = client.get("/about", headers={"host": "www.contexta.example.com"}, follow_redirects=False)
+    assert r.status_code == 301 and r.headers["location"] == "https://contexta.example.com/about"
+    assert client.get("/about", follow_redirects=False).status_code == 200
+    assert client.post("/ask/", json={}, follow_redirects=False).status_code != 301  # never for POST
+
+
+def test_workspace_shell_has_its_own_title_and_no_canonical(client, tmp_path):
+    shell = tmp_path / "index.html"
+    shell.write_text('<title>Contexta: home</title>\n    <link rel="canonical" href="__SITE_URL__/" />\n<h1>x</h1>')
+
+    class Req:
+        def __init__(self, path):
+            self.app, self.headers = client.app, {}
+            self.url = type("U", (), {"path": path, "scheme": "http", "netloc": "x"})()
+
+    ws = render_shell(Req("/workspace/w1/ask"), shell).body.decode()
+    assert "<title>Workspace · Contexta</title>" in ws and "canonical" not in ws
+    home = render_shell(Req("/"), shell).body.decode()
+    assert "<title>Contexta: home</title>" in home and 'href="https://contexta.example.com/"' in home

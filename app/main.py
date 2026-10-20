@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
 from app.observability import RequestContextMiddleware, configure_logging
@@ -16,7 +17,7 @@ from app.routes import router
 from app.routes_admin import router as admin_router
 from app.routes_billing import router as billing_router
 from app.routes_workspace import router as workspace_router
-from app.seo import render_shell
+from app.seo import PermanentRedirects, not_found_handler, render_shell
 from app.seo import router as seo_router
 from core import db, tracing
 from core.cache import make_answer_cache
@@ -130,6 +131,7 @@ def create_app(http_transport: httpx.AsyncBaseTransport | None = None) -> FastAP
         allow_headers=["*"],
         expose_headers=["X-Request-ID"],
     )
+    app.add_middleware(PermanentRedirects, site_url=get_settings().site_url)  # /about/ -> /about, www <-> apex
     app.add_middleware(RequestContextMiddleware)  # outermost: sees every response, incl. CORS and 500s
     app.state.http_transport = http_transport
     app.include_router(router)
@@ -137,6 +139,7 @@ def create_app(http_transport: httpx.AsyncBaseTransport | None = None) -> FastAP
     app.include_router(workspace_router)
     app.include_router(billing_router)
     app.include_router(seo_router)
+    app.add_exception_handler(StarletteHTTPException, not_found_handler)  # browsers get a 404 page
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     if (FRONTEND_DIST / "index.html").exists():

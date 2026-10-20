@@ -2,6 +2,16 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — SEO checklist gaps (2026-10-20)
+
+### Added
+- Link-preview image (`/static/og.png`, 1200×630, drawn by `scripts/make_og_image.py`) on `/` and `/about`: `og:image` with size and alt text, `twitter:card` = `summary_large_image`.
+- A real 404 page (status 404, `noindex`) for unknown addresses opened in a browser; API clients and deliberate endpoint 404s keep their JSON errors.
+- Permanent (301) redirects: trailing slash (`/about/` → `/about`) and `www.` ↔ the host in `APP_SITE_URL`. GET/HEAD only.
+
+### Fixed
+- Workspace pages no longer carry a canonical link to `/` (it contradicted their `noindex`) and get the title "Workspace · Contexta" from the server.
+
 ## [Unreleased] — Vercel deployment (2026-10-20)
 
 ### Added
