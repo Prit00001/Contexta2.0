@@ -19,6 +19,8 @@ services:
         value: "20"
       - key: LOG_FORMAT
         value: json
+      - key: APP_SITE_URL # public address, e.g. https://contexta.onrender.com (sitemap, canonical links)
+        sync: false
       # ---- workspaces (Supabase) ----
       - key: DATABASE_URL # Supabase "Session pooler" connection string (Render has no IPv6)
         sync: false
