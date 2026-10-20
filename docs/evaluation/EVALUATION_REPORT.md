@@ -479,6 +479,55 @@ rewritten once with feedback naming the sentences, and the rewrite is kept only 
 unsupported claims. Next step: run it on the 141 questions with `CLAIM_CHECK=llm` and count flagged
 sentences before and after.
 
+## 5k. Per-source relevance cutoffs: library vs arXiv (2026-10-20)
+
+**Source.** *Beyond the Reranker* ([arXiv 2606.28367](https://arxiv.org/abs/2606.28367), 2026): on
+mixed collections, a per-source calibrated acceptance threshold (SSCC) was one of only two add-ons that
+still helped on top of a strong reranker. Contexta mixes a curated library with live arXiv, whose
+results come from a keyword query built from the question, so one `MIN_SCORE` may fit them differently.
+
+**Implementation.** `MIN_SCORE_ARXIV` gives arXiv results their own cutoff (`core/lc_retriever.py`;
+unset = `MIN_SCORE`).
+
+**Calibration.** `eval/source_thresholds.py --every 2`: 80 questions (all types) with the frozen arXiv
+snapshot; every arXiv result above 0.10 labelled by an LLM ("does this abstract help answer the
+question?") — gpt-oss-120b for the first 34 questions, gpt-oss-20b after its quota ran out; 9 questions
+could not be labelled and are left out. Library relevance = the dataset's gold papers (understates
+library precision: other library papers can be useful too).
+
+| Hybrid-score cutoff | Library precision | arXiv precision | arXiv kept | Useful arXiv kept |
+| --- | --- | --- | --- | --- |
+| 0.225 (today) | 0.158 | 0.096 | 690 | 66 |
+| 0.300 | 0.282 | 0.125 | 496 | 62 |
+| 0.350 | 0.429 | 0.142 | 365 | 52 |
+| 0.400 | 0.598 | 0.162 | 284 | 46 |
+| 0.450 | 0.773 | 0.164 | 195 | 32 |
+
+Library precision climbs steeply with the cutoff; arXiv precision barely moves (0.10 → 0.16): **the
+score says little about whether an arXiv paper is useful.** Matching the library's precision needs an
+arXiv cutoff of 0.40, which drops 30% of the useful arXiv papers with the useless ones.
+
+**End to end** (`/ask`'s default path with the reranker, 80 questions, top 5 shown):
+
+| arXiv cutoff | Gold paper in top 5 | Useful arXiv shown | Useless arXiv shown |
+| --- | --- | --- | --- |
+| 0.225 (= `MIN_SCORE`, today) | 0.972 | 35 | 190 |
+| 0.30 | 0.972 | 32 | 166 |
+| 0.35 | 0.972 | 28 | 146 |
+| 0.40 | 0.972 | 25 | 125 |
+
+Raising the cutoff removes useful and useless arXiv papers in about the same proportion and doesn't
+change gold recall. The cross-encoder separates them only slightly better than the hybrid score
+(ROC AUC 0.749 vs 0.712 on 858 labelled arXiv results).
+
+**Decision.** `MIN_SCORE_ARXIV` stays unset (no gain to claim). The finding that matters: **only ~6% of
+fetched arXiv papers help answer the question, and ≈2.4 of the 5 sources shown per question are
+unhelpful arXiv papers.** The fix is upstream — the arXiv query (keywords joined with OR, no subject
+filter; e.g. a Transformer question returns a 2007 measure-theory paper) — not a cutoff. Next step:
+restrict the query to cs.CL / cs.LG / cs.IR / cs.AI / stat.ML and require the main terms, then refetch
+the snapshot and re-measure. Meanwhile the sufficiency check (§5l) and claim checks (§5j) limit the
+damage those papers can do to answers.
+
 ## 5l. Sufficient-context check before answering (2026-10-20)
 
 **Source.** Joren et al., *Sufficient Context: A New Lens on Retrieval Augmented Generation Systems*

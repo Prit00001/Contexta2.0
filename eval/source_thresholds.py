@@ -51,12 +51,12 @@ LABEL_PROMPT = (
 )
 
 
-async def _label_batch(gen: Generator, question: str, papers: list[dict]) -> dict[str, bool]:
+async def _label_batch(gen: Generator, question: str, papers: list[dict], tries: int) -> dict[str, bool] | None:
     body = "\n\n".join(
         f'<abstract id="{i}">\n{_neutralise(p["text"][:800])}\n</abstract>' for i, p in enumerate(papers, 1)
     )
     msgs = [SystemMessage(content=LABEL_PROMPT), HumanMessage(content=f"Question: {question}\n\n{body}")]
-    for attempt in range(8):
+    for attempt in range(tries):
         text, _ = await gen.complete(msgs)
         try:
             data = json.loads(text[text.index("{") : text.rindex("}") + 1]) if text else None
@@ -67,23 +67,27 @@ async def _label_batch(gen: Generator, question: str, papers: list[dict]) -> dic
             pass
         gen._cooldown_until.clear()
         await asyncio.sleep(min(60, 8 * 2**attempt))
-    raise SystemExit(f"labelling kept failing for: {question!r}; rerun (progress is cached)")
+    return None
 
 
-async def label(gen: Generator, question: str, papers: list[dict], cache: dict) -> dict[str, bool]:
-    """Labels for every paper, 6 abstracts per call (long lists made the model drop or renumber ids)."""
+async def label(gen: Generator, question: str, papers: list[dict], cache: dict, tries: int) -> dict[str, bool] | None:
+    """Labels for every paper, 6 abstracts per call (long lists made the model drop or renumber ids).
+    None when the provider keeps failing (quota): that question's arXiv results are left out."""
     if question in cache:
         return cache[question]
     labels: dict[str, bool] = {}
     for start in range(0, len(papers), 6):
-        labels |= await _label_batch(gen, question, papers[start : start + 6])
+        batch = await _label_batch(gen, question, papers[start : start + 6], tries)
+        if batch is None:
+            return None
+        labels |= batch
     cache[question] = labels
     with CACHE.open("a", encoding="utf-8") as f:
         f.write(json.dumps({"q": question, "labels": labels}) + "\n")
     return labels
 
 
-async def main(every: int = 1) -> None:
+async def main(every: int = 1, tries: int = 8) -> None:
     s = get_settings()
     embedder = Embedder("fastembed", s.embed_model, s.model_cache_dir)
     library = Retriever(embedder, s.cache_dir / "embeddings.npz")
@@ -96,6 +100,7 @@ async def main(every: int = 1) -> None:
             row = json.loads(line)
             cache[row["q"]] = row["labels"]
     rows: list[tuple[str, float, bool]] = []  # (source, score, relevant)
+    skipped = 0
     async with httpx.AsyncClient() as client:
         gen = Generator(s.providers, client, s.llm_timeout)
         # every=2: already-labelled questions plus every second other one (quota-limited runs)
@@ -114,14 +119,18 @@ async def main(every: int = 1) -> None:
             ranked = [p for p in rank([(p, float(v @ qvec)) for p, v in zip(papers, vecs, strict=True)], q["question"])
                       if p["score"] >= FLOOR]  # fmt: skip
             to_label = [p for p in ranked if copies.get("arxiv:" + p["id"].removeprefix("arxiv_")) is None]
-            labels = await label(gen, q["question"], to_label, cache) if to_label else {}
+            labels = await label(gen, q["question"], to_label, cache, tries) if to_label else {}
+            if labels is None:
+                skipped += 1
+                continue
             for p in ranked:
                 lib = copies.get("arxiv:" + p["id"].removeprefix("arxiv_"))
                 rows.append(("arxiv", p["score"], lib in gold if lib else labels.get(p["id"], False)))
             if n % 10 == 0:
                 print(f"  {n}/{len(questions)} questions", flush=True)
 
-    print(f"\ncandidates: library {sum(r[0] == 'library' for r in rows)}, arXiv {sum(r[0] == 'arxiv' for r in rows)}")
+    print(f"\nquestions whose arXiv results could not be labelled (left out): {skipped}")
+    print(f"candidates: library {sum(r[0] == 'library' for r in rows)}, arXiv {sum(r[0] == 'arxiv' for r in rows)}")
     print("\n| Cutoff | Library precision | Library kept | arXiv precision | arXiv kept | arXiv useful kept |")
     print("| --- | --- | --- | --- | --- | --- |")
     stats = {}
@@ -148,4 +157,6 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--every", type=int, default=1, help="label every Nth question (plus cached ones)")
-    asyncio.run(main(ap.parse_args().every))
+    ap.add_argument("--tries", type=int, default=8, help="attempts per labelling call before skipping it")
+    args = ap.parse_args()
+    asyncio.run(main(args.every, args.tries))

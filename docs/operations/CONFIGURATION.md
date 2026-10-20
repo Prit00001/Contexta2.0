@@ -44,6 +44,7 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 | `RERANK_LIBRARY_BOOST` | `3` | With reranking on: bonus (cross-encoder logit units) for curated-library sources over live arXiv in the final order. 0 = none; 5 = more library, less arXiv ([ADR-005](../decisions/ADR-005-library-prior.md)) |
 | `LIBRARY_BOOST` | `0.1` | Same prior on the hybrid score, used only when reranking is off. Never lets a source past `MIN_SCORE` |
 | `MIN_SCORE` | per backend | Hybrid-score cut for library/arXiv sources, [-1, 1]. Unset: `0.225` on fastembed (MiniLM), `0.075` on hash embeddings (incl. the fallback) — calibrated with `eval/run_eval.py --sweep-min-score` |
+| `MIN_SCORE_ARXIV` | = `MIN_SCORE` | A separate cutoff for live arXiv results (per-source calibration, arXiv 2606.28367). Calibrated in [EVALUATION_REPORT §5k](../evaluation/EVALUATION_REPORT.md): raising it removes useful and useless arXiv papers alike, so it is left unset |
 | `ARXIV_ENABLED` | `true` | Global switch; per request `use_arxiv` |
 | `ARXIV_MAX_RESULTS` | `12` | 1–50 |
 | `ARXIV_BUDGET_S` | `9` | Total arXiv time budget per request |

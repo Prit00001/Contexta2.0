@@ -2,6 +2,17 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Techniques from recent papers, measured (2026-10-20)
+
+### Added
+- `SUFFICIENCY_CHECK=llm` (after *Sufficient Context*, ICLR 2025): before answering, judge whether the retrieved passages are enough; abstain and name what is missing when they clearly aren't. Measured on the default path: correct abstentions 7/20 → 12/20, one answerable question declined (a retrieval miss). Off by default (+1 model call).
+- `MIN_SCORE_ARXIV`: a per-source relevance cutoff for arXiv (after *Beyond the Reranker*, 2026). Calibrated with LLM relevance labels: no cutoff separates useful arXiv papers from the rest, so it stays unset.
+- Eval: `run_eval.py --with-llm --arxiv --rerank` replays `/ask`'s real default path; `eval/source_thresholds.py` calibrates per-source cutoffs.
+
+### Measured, not changed
+- Query expansion on top of the reranker (`QUERY_REWRITE=decompose`): R@1 0.783 → 0.811, R@5 unchanged at 0.991. Stays off (+1 model call for a ranking gain the model rarely sees).
+- Finding: only ~6% of fetched arXiv papers help answer the question; the arXiv query is the next thing to fix (EVALUATION_REPORT §5k).
+
 ## [Unreleased] — Stronger hallucination checks (2026-10-20)
 
 ### Added
