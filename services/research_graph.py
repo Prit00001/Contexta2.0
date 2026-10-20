@@ -12,6 +12,9 @@
   LLM judge (``llm``). When it finds a claim its source doesn't support and ``claim_repair`` is on,
   it sends the answer back to ``generate`` once with feedback naming those sentences; the repaired
   answer is checked again and kept only if it has fewer unsupported claims than the first.
+* ``check_context`` (``SUFFICIENCY_CHECK=llm``, ``core.sufficiency``) runs between ``retrieve`` and
+  ``generate``: when the retrieved passages clearly don't address the question, the workflow
+  abstains (``insufficient_evidence``) instead of letting the model answer from memory.
 * ``contextualize`` (P2-14, ``core.followup``) runs first when the request carries ``history``: it
   turns a follow-up into a standalone question, which every later node uses.
 * ``rewrite`` (Phase 3, ``core.query_rewrite``) exists only when ``rewrite_mode != "off"``. In
@@ -46,6 +49,7 @@ from core.generator import Generator, extractive_answer
 from core.prompts import RETRY_FEEDBACK
 from core.query_rewrite import MODES as REWRITE_MODES
 from core.query_rewrite import fuse, retrieval_queries, rewrite_question
+from core.sufficiency import abstain_message, check_sufficiency
 
 log = logging.getLogger("contexta.workflow")
 
@@ -83,6 +87,7 @@ class ResearchState(TypedDict, total=False):
     rewritten: bool
     fallback_answer: Optional[str]
     citation_report: Any  # core.citations.CitationReport
+    sufficiency: str  # check_context verdict: sufficient / partial / insufficient / unknown
     # claim repair: one rewrite when a check finds unsupported claims
     repair_feedback: str
     repair_started: bool
@@ -143,6 +148,7 @@ def build_research_graph(
     rewriter: Generator | None = None,
     rewrite_gap_score: float = 0.35,
     claim_repair: bool = False,
+    sufficiency_check: bool = False,
 ):
     if isinstance(claim_check, bool):  # older callers: True meant the LLM judge
         claim_check = "llm" if claim_check else "off"
@@ -305,6 +311,14 @@ def build_research_graph(
             "diagnostics": [note],
         }, "ok"
 
+    @_traced("check_context")
+    async def check_context(state: ResearchState, config: RunnableConfig):
+        verdict, missing, diagnostics = await check_sufficiency(state["question"], state["sources"], generator.complete)
+        update = {"sufficiency": verdict, "diagnostics": diagnostics}
+        if verdict == "insufficient":
+            update["empty_message"] = abstain_message(missing)
+        return update, verdict
+
     @_traced("insufficient_evidence")
     async def insufficient_evidence(state: ResearchState, config: RunnableConfig):
         answer = state.get("empty_message") or "The available sources don't contain enough information to answer."
@@ -359,7 +373,12 @@ def build_research_graph(
             return "finalize"
         if rewrite_mode == "selective" and not state.get("rewritten") and retrieval_is_weak(state):
             return "rewrite"
-        return "generate" if state.get("sources") else "insufficient_evidence"
+        if not state.get("sources"):
+            return "insufficient_evidence"
+        return "check_context" if sufficiency_check else "generate"
+
+    def after_check_context(state: ResearchState) -> str:
+        return "insufficient_evidence" if state.get("sufficiency") == "insufficient" else "generate"
 
     def after_generate(state: ResearchState) -> str:
         return "fallback" if state.get("fallback_answer") is not None else "validate_answer"
@@ -390,6 +409,8 @@ def build_research_graph(
         nodes.append(check_claims)
     if rewrite_mode != "off":
         nodes.append(rewrite)
+    if sufficiency_check:
+        nodes.append(check_context)
     for node in nodes:
         g.add_node(node.__name__, node)
     g.add_edge(START, "validate_request")
@@ -397,6 +418,9 @@ def build_research_graph(
     g.add_conditional_edges("validate_request", after_validate_request, [first_search, "contextualize", "finalize"])
     g.add_edge("contextualize", first_search)
     after_retrieve_targets = ["generate", "insufficient_evidence", "finalize"]
+    if sufficiency_check:
+        after_retrieve_targets.append("check_context")
+        g.add_conditional_edges("check_context", after_check_context, ["generate", "insufficient_evidence"])
     if rewrite_mode == "selective":
         after_retrieve_targets.append("rewrite")
     g.add_conditional_edges("retrieve", after_retrieve, after_retrieve_targets)

@@ -17,3 +17,5 @@ eval/rewrite_cache.json
 eval/boost_compare_report.json
 eval/boost_compare_cache.jsonl
 eval/claim_bench_cache.jsonl
+eval/source_label_cache.jsonl
+eval/source_thresholds_report.json

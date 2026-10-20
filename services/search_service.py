@@ -72,6 +72,7 @@ class SearchService:
             settings.llm_max_attempts,
             claim_check=settings.claim_check,
             claim_repair=settings.claim_repair,
+            sufficiency_check=settings.sufficiency_check == "llm",
             rewrite_mode=settings.query_rewrite,
             rewriter=rewriter,
             rewrite_gap_score=settings.rewrite_gap_score,
@@ -82,6 +83,7 @@ class SearchService:
             hybrid_bm25_enabled=settings.hybrid_bm25_enabled,
             reranker=reranker, rerank_candidates=settings.rerank_candidates,
             library_boost=settings.library_boost, rerank_library_boost=settings.rerank_library_boost,
+            min_score_arxiv=settings.min_score_arxiv,
         )  # fmt: skip
         # core.cache: Redis-backed (shared across instances) when REDIS_URL is set, else per process
         self.cache = answer_cache if answer_cache is not None else InMemoryAnswerCache(settings.answer_cache_ttl)

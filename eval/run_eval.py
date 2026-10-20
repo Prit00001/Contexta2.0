@@ -301,19 +301,36 @@ async def run_score_sweep(questions: list[dict], hybrid_bm25: bool = False) -> d
 # ---- answer-quality metrics (--with-llm) --------------------------------------------------
 
 
-async def run_answers(questions: list[dict], pace: float = 0.0) -> list[dict]:
+async def run_answers(
+    questions: list[dict], pace: float = 0.0, arxiv_snapshot: bool = False, rerank: bool = False
+) -> list[dict]:
+    """``arxiv_snapshot`` + ``rerank`` = /ask's default path (library + arXiv, reranked), replayed."""
     settings = get_settings()
     embedder = Embedder(settings.embed_backend, settings.embed_model, settings.model_cache_dir)
     library = Retriever(embedder, settings.cache_dir / "embeddings.npz")
     library.build(DOCUMENTS)
     async with httpx.AsyncClient() as client:
-        arxiv = ArxivClient(client, settings.arxiv_max_results, settings.arxiv_cache_ttl)
+        arxiv = (
+            SnapshotArxiv()
+            if arxiv_snapshot
+            else ArxivClient(client, settings.arxiv_max_results, settings.arxiv_cache_ttl)
+        )
+        reranker = None
+        if rerank:
+            reranker = Reranker(settings.rerank_model or DEFAULT_RERANK_MODEL, settings.model_cache_dir,
+                                max_chars=settings.rerank_max_chars)  # fmt: skip
         generator = Generator(settings.providers, client, settings.llm_timeout)
         retriever = ResearchRetriever(
-            embedder=embedder, library=library, arxiv=arxiv, arxiv_enabled=False,
+            embedder=embedder, library=library, arxiv=arxiv, arxiv_enabled=arxiv_snapshot,
             arxiv_budget_s=settings.arxiv_budget_s, min_score=settings.min_score_for(embedder.backend),
+            reranker=reranker, rerank_candidates=settings.rerank_candidates,
+            library_boost=settings.library_boost, rerank_library_boost=settings.rerank_library_boost,
+            min_score_arxiv=settings.min_score_arxiv,
         )  # fmt: skip
-        graph = build_research_graph(generator, settings.llm_max_attempts, claim_check=settings.claim_check == "llm")
+        graph = build_research_graph(
+            generator, settings.llm_max_attempts, claim_check=settings.claim_check, claim_repair=settings.claim_repair,
+            sufficiency_check=settings.sufficiency_check == "llm",
+        )  # fmt: skip
 
         results = []
         for i, q in enumerate(questions):
@@ -323,7 +340,7 @@ async def run_answers(questions: list[dict], pace: float = 0.0) -> list[dict]:
             while True:
                 await wait_for_provider(generator)
                 t0 = time.perf_counter()
-                state = await run_research(graph, retriever, q["question"], 5, options={"use_arxiv": False})
+                state = await run_research(graph, retriever, q["question"], 5, options={"use_arxiv": arxiv_snapshot})
                 total_ms = (time.perf_counter() - t0) * 1000
                 if not hit_rate_limit(state.get("diagnostics", [])) or rate_limit_retries >= RATE_LIMIT_RETRIES:
                     break
@@ -465,7 +482,7 @@ async def main_async(args: argparse.Namespace) -> None:
         "retrieval_detail": retrieval_results,
     }
     if args.with_llm:
-        answer_results = await run_answers(questions, pace=args.pace)
+        answer_results = await run_answers(questions, pace=args.pace, arxiv_snapshot=args.arxiv, rerank=args.rerank)
         report["answers"] = summarize_answers(answer_results)
         report["answers_detail"] = answer_results
         rows = [row for r in answer_results for row in r.pop("claim_rows")]

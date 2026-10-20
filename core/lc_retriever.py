@@ -17,7 +17,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 from langchain_core.callbacks import AsyncCallbackManagerForRetrieverRun, CallbackManagerForRetrieverRun
@@ -115,6 +115,16 @@ class ResearchRetriever(_AsyncOnlyRetriever):
     # `score` stays raw. EVALUATION_REPORT 5g.
     library_boost: float = 0.0
     rerank_library_boost: float = 0.0
+    # Per-source cutoff for arXiv (MIN_SCORE_ARXIV; None = min_score). arXiv results come from a keyword
+    # query built from the question, which inflates their keyword score, so one cutoff fits the two
+    # sources differently (SSCC, arXiv 2606.28367; calibrated in EVALUATION_REPORT 5k).
+    min_score_arxiv: Optional[float] = None
+
+    def _passes(self, s: dict) -> bool:
+        cutoff = (
+            self.min_score_arxiv if s.get("source") == "arxiv" and self.min_score_arxiv is not None else self.min_score
+        )
+        return s["score"] >= cutoff
 
     async def _arxiv_candidates(self, question: str, qvec: np.ndarray) -> list[tuple[dict, float]]:
         papers = await self.arxiv.search(question)
@@ -141,7 +151,7 @@ class ResearchRetriever(_AsyncOnlyRetriever):
                 )
                 warnings.append(ARXIV_UNAVAILABLE)
         t_arxiv = time.perf_counter()
-        hybrid_ranked = [s for s in rank(candidates, question) if s["score"] >= self.min_score]
+        hybrid_ranked = [s for s in rank(candidates, question) if self._passes(s)]
         if self.library_boost and not reranking:  # with reranking on, the prior is applied after reranking
             hybrid_ranked.sort(
                 key=lambda s: s["score"] + (self.library_boost if s["source"] == "local" else 0.0), reverse=True

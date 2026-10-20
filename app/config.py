@@ -64,6 +64,8 @@ class Settings(BaseModel):
     cache_dir: Path = Path(".cache")
     model_cache_dir: Optional[str] = None
     min_score: Optional[float] = Field(None, ge=-1.0, le=1.0)  # None -> DEFAULT_MIN_SCORE[backend]
+    # A separate cutoff for live arXiv results (None = MIN_SCORE): EVALUATION_REPORT 5k.
+    min_score_arxiv: Optional[float] = Field(None, ge=-1.0, le=1.0)
     # P2-07, on by default since the measured run (EVALUATION_REPORT 5d.2/5f): R@1 0.711 -> 0.783 for
     # +0.4 s and +~120 MB peak RAM (411 MB measured with both models). RERANK_MODEL=none turns it off.
     rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
@@ -96,6 +98,9 @@ class Settings(BaseModel):
     # When a check finds a claim its source doesn't support, rewrite the answer once with that
     # feedback (one more model call, only for those answers); the better of the two is kept.
     claim_repair: bool = True
+    # Before answering, ask the model whether the retrieved passages are enough; abstain when they
+    # clearly are not (core.sufficiency, arXiv 2411.06037). llm = one more model call per question.
+    sufficiency_check: Literal["off", "llm"] = "off"
     # Phase 3 query rewriting (core.query_rewrite); off = the measured baseline
     query_rewrite: Literal["off", "single", "multi", "decompose", "selective"] = "off"
     rewrite_providers: tuple[ProviderSpec, ...] = ()  # empty: rewrite with the main provider chain

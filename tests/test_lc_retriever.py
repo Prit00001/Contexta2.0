@@ -141,3 +141,17 @@ def test_pdf_chunk_retriever(embedder):
     top = res.sources[0]
     assert top["page"] == 2 and top["chunk_id"] == "pdf:x#1" and top["document_id"] == "pdf:x"
     assert top["title"] == "paper.pdf · p. 2" and top["url"] == "" and len(res.sources) == 2
+
+
+def test_arxiv_gets_its_own_cutoff(embedder, library):
+    """MIN_SCORE_ARXIV: arXiv results face their own cutoff, library results keep MIN_SCORE."""
+    ok = lambda req: httpx.Response(200, text=ARXIV_XML)  # noqa: E731
+    both = asyncio.run(make(embedder, library, arxiv_with(ok)).aretrieve(Q, 10, use_arxiv=True)).sources
+    assert {s["source"] for s in both} == {"local", "arxiv"}
+    strict = make(embedder, library, arxiv_with(ok), min_score_arxiv=0.999)
+    only_lib = asyncio.run(strict.aretrieve(Q, 10, use_arxiv=True)).sources
+    assert only_lib and {s["source"] for s in only_lib} == {"local"}
+    lax = ResearchRetriever(embedder=embedder, library=library, arxiv=arxiv_with(ok), min_score=0.999,
+                            min_score_arxiv=0.0)  # fmt: skip
+    only_arxiv = asyncio.run(lax.aretrieve(Q, 10, use_arxiv=True)).sources
+    assert only_arxiv and {s["source"] for s in only_arxiv} == {"arxiv"}
