@@ -100,7 +100,7 @@ def test_upload_ask_isolation_and_api_keys(tmp_path, monkeypatch):
             assert body["sources"][0]["filename"] == "policy.md"
             # P2-FR-06: workspace Q&A runs on the same graph as /ask - same citation fields exist.
             assert body["outcome"] in ("answered", "extractive_fallback", "insufficient_evidence")
-            assert body["citation_check"]["verification"] == "marker_only"
+            assert body["citation_check"]["verification"] == "local_checks"
             assert [w["stage"] for w in body["workflow"]][:2] == ["validate_request", "retrieve"]
 
             # Grant B viewer access to A's workspace (bypassing the email-lookup admin endpoint,

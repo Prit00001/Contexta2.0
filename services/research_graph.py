@@ -8,7 +8,10 @@
                          v
                  insufficient_evidence -> finalize
 
-* ``check_claims`` (P2-FR-04) exists only when ``claim_check=True`` (``CLAIM_CHECK=llm``).
+* ``check_claims`` (P2-FR-04) runs unless ``CLAIM_CHECK=off``: free local checks (``local``), plus an
+  LLM judge (``llm``). When it finds a claim its source doesn't support and ``claim_repair`` is on,
+  it sends the answer back to ``generate`` once with feedback naming those sentences; the repaired
+  answer is checked again and kept only if it has fewer unsupported claims than the first.
 * ``contextualize`` (P2-14, ``core.followup``) runs first when the request carries ``history``: it
   turns a follow-up into a standalone question, which every later node uses.
 * ``rewrite`` (Phase 3, ``core.query_rewrite``) exists only when ``rewrite_mode != "off"``. In
@@ -37,6 +40,7 @@ from core import metrics, tracing
 from core.abstention import is_abstention
 from core.citations import validate_citations
 from core.claim_support import check_claims as run_claim_check
+from core.claim_support import repair_feedback
 from core.followup import MAX_TURNS, contextualize
 from core.generator import Generator, extractive_answer
 from core.prompts import RETRY_FEEDBACK
@@ -79,6 +83,11 @@ class ResearchState(TypedDict, total=False):
     rewritten: bool
     fallback_answer: Optional[str]
     citation_report: Any  # core.citations.CitationReport
+    # claim repair: one rewrite when a check finds unsupported claims
+    repair_feedback: str
+    repair_started: bool
+    pre_repair: dict  # the first answer, restored if the rewrite is not better
+    repair_reverted: bool
     # outcome
     outcome: Outcome
     error: Optional[str]
@@ -129,17 +138,22 @@ def _traced(stage: str):
 def build_research_graph(
     generator: Generator,
     max_attempts: int = 2,
-    claim_check: bool = False,
+    claim_check: bool | str = "off",
     rewrite_mode: str = "off",
     rewriter: Generator | None = None,
     rewrite_gap_score: float = 0.35,
+    claim_repair: bool = False,
 ):
+    if isinstance(claim_check, bool):  # older callers: True meant the LLM judge
+        claim_check = "llm" if claim_check else "off"
+    if claim_check not in ("off", "local", "llm"):
+        raise ValueError(f"unknown claim check {claim_check!r}")
     if rewrite_mode not in REWRITE_MODES:
         raise ValueError(f"unknown rewrite mode {rewrite_mode!r}")
     max_attempts = max(1, min(int(max_attempts), 3))
     rewriter = rewriter or generator  # REWRITE_PROVIDERS may point rewriting at another chain (e.g. Ollama)
     rewrite_first = rewrite_mode in ("single", "multi", "decompose")
-    answered_next = "check_claims" if claim_check else "finalize"
+    answered_next = "check_claims" if claim_check != "off" else "finalize"
 
     @_traced("validate_request")
     async def validate_request(state: ResearchState, config: RunnableConfig):
@@ -231,9 +245,16 @@ def build_research_graph(
     @_traced("generate")
     async def generate(state: ResearchState, config: RunnableConfig):
         attempts = state.get("attempts", 0) + 1
-        feedback = RETRY_FEEDBACK if attempts > 1 else None
+        repairing = bool(state.get("repair_feedback")) and not state.get("repair_started")
+        feedback = state["repair_feedback"] if repairing else (RETRY_FEEDBACK if attempts > 1 else None)
         gen = await generator.generate(state["question"], state["sources"], feedback=feedback)
         update = {"attempts": attempts, "diagnostics": gen.warnings}
+        if repairing:
+            update["repair_started"] = True
+            if not gen.llm_used:  # no provider for the rewrite: keep the first answer as it was
+                return update | _restore(
+                    state, "claim repair: no AI provider answered; kept the first answer"
+                ), "repair_failed"
         if not gen.llm_used:
             update["fallback_answer"] = gen.answer
             update["_category"] = "llm_unavailable"
@@ -252,6 +273,10 @@ def build_research_graph(
         report = validate_citations(state["answer"], state["sources"], state.get("removed_markers"))
         if report.usable(has_sources=bool(state["sources"])):
             return {"citation_report": report, "answer": report.answer}, "ok"
+        if state.get("pre_repair"):  # the rewrite came back unusable: the first answer stands
+            return _restore(
+                state, "claim repair: the rewrite had no valid citations; kept the first answer"
+            ), "repair_failed"
         if is_abstention(report.answer, report.valid_markers):
             # The model followed prompt rule 2: nothing retrieved answers the question. Keep its
             # explanation instead of retrying or quoting irrelevant sources (core.abstention).
@@ -295,10 +320,22 @@ def build_research_graph(
     @_traced("check_claims")
     async def check_claims(state: ResearchState, config: RunnableConfig):
         report = state["citation_report"]
-        status, diagnostics = await run_claim_check(report, state["sources"], generator.complete)
+        judge = generator.complete if claim_check == "llm" else None
+        status, diagnostics = await run_claim_check(report, state["sources"], judge)
         update = {"citation_report": report, "diagnostics": diagnostics}
         if status != "ok":
             update["_category"] = "llm_unavailable" if status == "judge_unavailable" else "llm_invalid_output"
+        first = state.get("pre_repair")
+        if first:  # this is the rewritten answer: keep it only if it has fewer unsupported claims
+            if _unsupported(report) >= _unsupported(first["citation_report"]):
+                kept = _restore(state, "claim repair: the rewrite was not better; kept the first answer")
+                return update | kept | {"diagnostics": diagnostics + kept["diagnostics"]}, "repair_reverted"
+            return update, "repaired"
+        feedback = repair_feedback(report) if claim_repair and state.get("llm_used") else None
+        if feedback:
+            keep = {k: state.get(k) for k in ("answer", "provider", "model", "removed_markers")}
+            update |= {"repair_feedback": feedback, "pre_repair": keep | {"citation_report": report}}
+            return update, "repair"
         return update, status
 
     @_traced("finalize")
@@ -327,7 +364,18 @@ def build_research_graph(
     def after_generate(state: ResearchState) -> str:
         return "fallback" if state.get("fallback_answer") is not None else "validate_answer"
 
+    def after_generate_or_kept(state: ResearchState) -> str:
+        if state.get("repair_reverted"):
+            return "finalize"
+        return after_generate(state)
+
+    def after_check_claims(state: ResearchState) -> str:
+        repair_due = state.get("repair_feedback") and not state.get("repair_started")
+        return "generate" if repair_due else "finalize"
+
     def after_validate_answer(state: ResearchState) -> str:
+        if state.get("repair_reverted"):
+            return "finalize"
         report = state["citation_report"]
         if report.usable(has_sources=bool(state["sources"])):
             return answered_next
@@ -338,7 +386,7 @@ def build_research_graph(
     g = StateGraph(ResearchState)
     nodes = [validate_request, retrieve, generate, validate_answer, fallback, insufficient_evidence, finalize]
     nodes.append(contextualize_followup)
-    if claim_check:
+    if claim_check != "off":
         nodes.append(check_claims)
     if rewrite_mode != "off":
         nodes.append(rewrite)
@@ -354,18 +402,27 @@ def build_research_graph(
     g.add_conditional_edges("retrieve", after_retrieve, after_retrieve_targets)
     if rewrite_mode != "off":
         g.add_edge("rewrite", "retrieve")
-    g.add_conditional_edges("generate", after_generate, ["validate_answer", "fallback"])
+    g.add_conditional_edges("generate", after_generate_or_kept, ["validate_answer", "fallback", "finalize"])
     g.add_conditional_edges(
         "validate_answer",
         after_validate_answer,
         list(dict.fromkeys([answered_next, "finalize", "generate", "fallback"])),
     )
     g.add_edge("fallback", answered_next)
-    if claim_check:
-        g.add_edge("check_claims", "finalize")
+    if claim_check != "off":
+        g.add_conditional_edges("check_claims", after_check_claims, ["generate", "finalize"])
     g.add_edge("insufficient_evidence", "finalize")
     g.add_edge("finalize", END)
     return g.compile()
+
+
+def _unsupported(report) -> int:
+    return sum(1 for c in report.claims if c.get("support") == "not_supported")
+
+
+def _restore(state: ResearchState, note: str) -> dict:
+    """Put the pre-repair answer back (it was already validated and checked)."""
+    return dict(state["pre_repair"]) | {"repair_reverted": True, "diagnostics": [note]}
 
 
 def _initial_state(
@@ -417,8 +474,9 @@ async def stream_research(
     * ``("sources", [source, ...])`` once retrieval has results;
     * ``("token", text)`` - answer text from the ``generate`` node only (rewrite and claim-check
       calls also stream internally, but are never shown);
-    * ``("reset", {"attempt"})`` - the streamed draft failed citation validation and is being
-      regenerated, so clients must discard the text shown so far;
+    * ``("reset", {"attempt"})`` - the streamed draft failed citation validation, or a claim check
+      found unsupported claims (``"reason": "repair"``), and is being regenerated, so clients must
+      discard the text shown so far (the final state is always the answer kept);
     * ``("final", state)`` - the complete final state, last.
 
     Streamed tokens are the model's raw draft: hallucinated ``[n]`` markers are only removed in the
@@ -443,6 +501,8 @@ async def stream_research(
                     generated += node == "generate"
                     if node == "validate_answer" and step["status"] == "retry":
                         yield "reset", {"attempt": generated + 1}
+                    if node == "check_claims" and step["status"] == "repair":  # rewriting flagged claims
+                        yield "reset", {"attempt": generated + 1, "reason": "repair"}
                 if node == "retrieve" and (update or {}).get("sources"):
                     yield "sources", update["sources"]
         else:

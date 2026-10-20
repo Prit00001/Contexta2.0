@@ -2,6 +2,14 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Stronger hallucination checks (2026-10-20)
+
+### Added
+- Claim checks on by default (`CLAIM_CHECK=local`, no model call): a sentence stating a figure (175 billion, 40%, 2019) that none of its cited passages contain is marked `not_supported` (`support_method: "numbers"`, with `unsupported_numbers`). Model names (GPT-3, LLaMA-13B), small counts and number words are handled. `CLAIM_CHECK=llm` adds the LLM judge for the rest; `off` restores marker-only checks.
+- Claim repair (`CLAIM_REPAIR`, on): a flagged answer is rewritten once with feedback naming the sentences and why; the rewrite is kept only if it has fewer unsupported claims, else the first answer stays with its flags. Streaming clients get a `reset` event with `"reason": "repair"`.
+- The answer view names the missing figure on a flagged sentence and counts flagged sentences in the evidence line.
+- `eval/claim_check_bench.py`: benchmark from 250 real claims plus wrong-source, wrong-number and flipped-direction variants.
+
 ## [Unreleased] — SEO checklist gaps (2026-10-20)
 
 ### Added

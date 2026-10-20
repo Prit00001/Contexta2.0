@@ -118,16 +118,17 @@ def test_request_to_answer_with_library_and_arxiv(env):
     assert d["citations"][0]["chunk_id"] == d["sources"][0]["chunk_id"]
     assert all(cl["status"] == "cited" for cl in d["claims"])
     assert d["citation_check"] == {
-        "verification": "marker_only",
+        "verification": "local_checks",
         "valid_markers": 2,
         "removed_markers": [],
         "uncited_claims": 0,
-        "supported_claims": None,
-        "not_supported_claims": None,
-        "unknown_claims": None,
-    }  # fmt: skip  (claim counts: CLAIM_CHECK=llm only)
+        "supported_claims": 0,
+        "not_supported_claims": 0,
+        "unknown_claims": 2,
+    }  # fmt: skip  (CLAIM_CHECK=local by default: no figure in these claims is missing from its source)
     assert [w["stage"] for w in d["workflow"]] == ["validate_request", "retrieve", "generate", "validate_answer",
-                                                   "finalize"]  # fmt: skip
+                                                   "check_claims", "finalize"]  # fmt: skip
+    assert len(net.llm_calls("api.groq.com")) == 1  # the local checks call no model
     assert any(s["source"] == "arxiv" for s in d["sources"]) and any(s["source"] == "local" for s in d["sources"])
 
 

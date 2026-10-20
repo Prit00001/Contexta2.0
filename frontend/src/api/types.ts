@@ -22,11 +22,12 @@ export interface Claim {
   markers: number[];
   status: "cited" | "uncited";
   support?: "supported" | "not_supported" | "unknown" | null;
-  support_method?: "quote" | "llm_judge" | null;
+  support_method?: "quote" | "numbers" | "llm_judge" | null;
+  unsupported_numbers?: string[] | null;
 }
 
 export interface CitationCheck {
-  verification: "marker_only" | "claim_support";
+  verification: "marker_only" | "local_checks" | "claim_support";
   valid_markers: number;
   removed_markers: number[];
   uncited_claims: number;

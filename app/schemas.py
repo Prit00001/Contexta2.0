@@ -60,18 +60,24 @@ class ClaimOut(BaseModel):
     markers: list[int] = []
     status: Literal["cited", "uncited"]
     support: Optional[Literal["supported", "not_supported", "unknown"]] = Field(
-        None, description="Only when CLAIM_CHECK=llm: does the cited text back this claim? (unmeasured LLM judge)"
+        None, description="Unless CLAIM_CHECK=off: does the cited text back this claim? (see support_method)"
     )
-    support_method: Optional[Literal["quote", "llm_judge"]] = Field(
-        None, description="quote: claim appears verbatim in a cited source; llm_judge: decided by an LLM"
+    support_method: Optional[Literal["quote", "numbers", "llm_judge"]] = Field(
+        None,
+        description="quote: claim appears verbatim in a cited source; numbers: it states a figure none of its "
+        "cited sources contain; llm_judge: decided by an LLM (CLAIM_CHECK=llm)",
+    )
+    unsupported_numbers: Optional[list[str]] = Field(
+        None, description="With support_method=numbers: the figures not found in the cited sources"
     )
 
 
 class CitationCheck(BaseModel):
-    verification: Literal["marker_only", "claim_support"] = Field(
+    verification: Literal["marker_only", "local_checks", "claim_support"] = Field(
         "marker_only",
         description="marker_only: markers are checked against retrieved sources, entailment is NOT verified. "
-        "claim_support: each cited claim was also checked against its cited text (see claims[].support)",
+        "local_checks: cited claims were also checked for verbatim quotes and figures their sources lack. "
+        "claim_support: as local_checks, plus an LLM judge for the rest (see claims[].support)",
     )
     valid_markers: int = 0
     removed_markers: list[int] = Field([], description="Hallucinated [n] numbers removed from the answer")

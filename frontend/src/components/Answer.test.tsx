@@ -42,3 +42,21 @@ test("a view that throws shows a recoverable message instead of a blank page", a
   render(<ErrorBoundary><Boom /></ErrorBoundary>);
   expect(screen.getByRole("alert")).toHaveTextContent("Something went wrong");
 });
+
+test("a sentence stating a figure its source lacks is flagged, and the summary counts it", () => {
+  const data = {
+    ...askResponse,
+    claims: [
+      { text: "GPT-3 has 350 billion parameters.", markers: [1], status: "cited" as const, support: "not_supported" as const,
+        support_method: "numbers" as const, unsupported_numbers: ["350"] },
+      { text: "It is autoregressive.", markers: [1], status: "cited" as const, support: "unknown" as const },
+    ],
+    citation_check: { verification: "local_checks" as const, valid_markers: 1, removed_markers: [], uncited_claims: 0,
+      supported_claims: 0, not_supported_claims: 1, unknown_claims: 1 },
+  };
+  render(<AnswerView data={data} sources={toViews(askResponse.sources)} />);
+  const flagged = screen.getByText("GPT-3 has 350 billion parameters.");
+  expect(flagged).toHaveClass("claim", "unsupported");
+  expect(flagged).toHaveAttribute("title", expect.stringContaining("Not in the cited source: 350"));
+  expect(screen.getByText("1 sentence states a figure not found in the cited source")).toBeInTheDocument();
+});

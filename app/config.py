@@ -90,7 +90,12 @@ class Settings(BaseModel):
     llm_timeout: float = Field(25.0, gt=0, le=120)
     llm_max_attempts: int = Field(2, ge=1, le=3)
     require_llm: bool = False
-    claim_check: Literal["off", "llm"] = "off"  # P2-FR-04: LLM-judge claim support (core.claim_support)
+    # P2-FR-04 (core.claim_support): local = free checks on every answer (quotes, figures); llm = plus
+    # an LLM judge (one more model call per answer); off = citation markers only.
+    claim_check: Literal["off", "local", "llm"] = "local"
+    # When a check finds a claim its source doesn't support, rewrite the answer once with that
+    # feedback (one more model call, only for those answers); the better of the two is kept.
+    claim_repair: bool = True
     # Phase 3 query rewriting (core.query_rewrite); off = the measured baseline
     query_rewrite: Literal["off", "single", "multi", "decompose", "selective"] = "off"
     rewrite_providers: tuple[ProviderSpec, ...] = ()  # empty: rewrite with the main provider chain

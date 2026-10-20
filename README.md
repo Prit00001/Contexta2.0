@@ -27,7 +27,7 @@ FastAPI · LangGraph · LangChain · FAISS · fastembed (all-MiniLM-L6-v2, ONNX)
 |---|---|
 | Evaluation harness | 143-question set (unreviewed), retrieval metrics, `--with-llm` answer metrics, `--sweep-min-score` calibration — [EVALUATION_REPORT](docs/evaluation/EVALUATION_REPORT.md) |
 | `MIN_SCORE` per backend | Unset → `0.225` on MiniLM, `0.075` on hash embeddings, both calibrated by `make eval-sweep` (the old 0.2 left 26% of answerable questions with no sources on hash embeddings) |
-| Claim-support check | `CLAIM_CHECK=llm` (off by default): each cited claim marked `supported` / `not_supported` / `unknown` — verbatim quotes locally, the rest by one LLM-judge call |
+| Claim-support check | On by default (`CLAIM_CHECK=local`, free): verbatim quotes count as `supported`, and a figure the cited source doesn't contain makes a claim `not_supported`. `CLAIM_CHECK=llm` adds an LLM judge for the rest. A flagged answer is rewritten once with feedback (`CLAIM_REPAIR`) and kept only if it improves. Measured: EVALUATION_REPORT §5j |
 | Hybrid BM25 | `HYBRID_BM25_ENABLED=true` (off by default) — [ADR-003](docs/decisions/ADR-003-hybrid-retrieval.md) |
 | Shared state | With `REDIS_URL`, answer cache and `/ask` rate limit are shared across instances; in-memory fallback if Redis is down |
 | Metrics | `GET /metrics` (Prometheus): answers by outcome, latency, per-stage durations, LLM calls, 429s — no user content |
@@ -62,7 +62,7 @@ flowchart LR
     GEN --> L[ChatOpenAI per provider]
     L --> P[(Groq · Gemini · OpenRouter · custom)]
     G --> V[Citation validator]
-    G -. CLAIM_CHECK=llm .-> CC[Claim-support check]
+    G -. CLAIM_CHECK .-> CC[Claim-support check]
     S <-. REDIS_URL .-> RD[(Redis: cache · rate limit)]
 ```
 
@@ -182,7 +182,7 @@ Response (abridged — full example in `/docs`):
 | `extractive_fallback` | No LLM configured/succeeded, or its answer cited nothing twice; answer is the best sentences from the top sources |
 | `insufficient_evidence` | Nothing relevant retrieved; no LLM call made |
 
-With `CLAIM_CHECK=llm`, each claim also carries `support` (`supported` / `not_supported` / `unknown`) and `support_method` (`quote` / `llm_judge`), and `citation_check.verification` is `claim_support` with `supported_claims` / `not_supported_claims` / `unknown_claims` counts. Otherwise those fields are `null`.
+Unless `CLAIM_CHECK=off`, each claim also carries `support` (`supported` / `not_supported` / `unknown`) and `support_method` (`quote` / `numbers` / `llm_judge`, with `unsupported_numbers` for `numbers`), and `citation_check` has `supported_claims` / `not_supported_claims` / `unknown_claims` counts; `verification` is `local_checks` (default) or `claim_support` (`llm`). With `off` those fields are `null` and `verification` is `marker_only`.
 
 Follow-ups: add `"history": [{"question": "What is QLoRA?", "answer": "..."}]` (oldest first, at most 3) and the response includes `standalone_question`, the rewritten question that was actually searched. The server keeps no conversation state.
 
@@ -206,7 +206,8 @@ All settings come from environment variables (or `.env`) and are validated at st
 | `REQUIRE_LLM` | `false` | Refuse to start without a provider |
 | `LLM_MAX_ATTEMPTS` | `2` | Generation attempts per question (1–3) |
 | `QUERY_REWRITE` | `off` | Phase 3 experiment: `single` / `multi` / `decompose` / `selective` |
-| `CLAIM_CHECK` | `off` | `llm`: check cited claims against their sources (+1 LLM call per uncached answer) |
+| `CLAIM_CHECK` | `local` | `local`: free quote + figure checks; `llm`: plus an LLM judge (+1 call per uncached answer); `off` |
+| `CLAIM_REPAIR` | `true` | Rewrite a flagged answer once; keep it only if it has fewer unsupported claims |
 | `MIN_SCORE` | per backend | Unset: `0.225` (MiniLM), `0.075` (hash embeddings, incl. fallback) — both calibrated |
 | `REDIS_URL` | – | Shared answer cache + rate limits across instances |
 | `ARXIV_ENABLED` | `true` | Live arXiv search |

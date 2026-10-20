@@ -131,7 +131,10 @@ function Claims({ claims, cite }: { claims: Claim[]; cite: Cite }) {
           why = "No citation: this sentence is not tied to a retrieved source.";
         } else if (c.support === "not_supported") {
           cls += " unsupported";
-          why = "An AI check found the cited source does not back this sentence.";
+          why =
+            c.support_method === "numbers" && c.unsupported_numbers?.length
+              ? `Not in the cited source: ${c.unsupported_numbers.join(", ")}. Check this figure before relying on it.`
+              : "An AI check found the cited source does not back this sentence.";
         }
         return (
           <span key={i}>
@@ -180,6 +183,14 @@ function Evidence({ data }: { data: AnswerFields }) {
         )}
         {!!cc.unknown_claims && <>, {cc.unknown_claims} unchecked</>}
       </>,
+    );
+  }
+  if (cc?.verification === "local_checks" && cc.not_supported_claims) {
+    const k = cc.not_supported_claims;
+    parts.push(
+      <span className="flag">
+        {k === 1 ? "1 sentence states a figure" : `${k} sentences state figures`} not found in the cited source
+      </span>,
     );
   }
   if (cc?.removed_markers.length) {

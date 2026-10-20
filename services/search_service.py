@@ -70,7 +70,8 @@ class SearchService:
         self.graph = build_research_graph(
             generator,
             settings.llm_max_attempts,
-            claim_check=settings.claim_check == "llm",
+            claim_check=settings.claim_check,
+            claim_repair=settings.claim_repair,
             rewrite_mode=settings.query_rewrite,
             rewriter=rewriter,
             rewrite_gap_score=settings.rewrite_gap_score,

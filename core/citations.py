@@ -8,8 +8,9 @@ What "validated" means here - deliberately narrow and stated in every response a
 * each answer sentence is a **claim** whose status is ``cited`` (has >= 1 valid marker) or
   ``uncited``.
 
-It does *not* check that the cited passage entails the claim; that is ``core.claim_support``
-(``CLAIM_CHECK=llm``, off by default), which switches ``verification`` to ``"claim_support"``.
+It does *not* check that the cited passage entails the claim; that is ``core.claim_support``, which
+switches ``verification`` to ``"local_checks"`` (``CLAIM_CHECK=local``, the default: verbatim quotes
+and figures) or ``"claim_support"`` (``CLAIM_CHECK=llm``: plus an LLM judge).
 Clients must not present ``cited`` as "verified true".
 """
 
@@ -80,7 +81,7 @@ class CitationReport:
             "removed_markers": self.removed_markers,
             "uncited_claims": self.uncited_claims,
         }
-        if self.verification == "claim_support":  # core.claim_support ran (CLAIM_CHECK=llm)
+        if self.verification in ("claim_support", "local_checks"):  # core.claim_support ran
             for verdict in ("supported", "not_supported", "unknown"):
                 out[f"{verdict}_claims"] = sum(1 for c in self.claims if c.get("support") == verdict)
         return out
