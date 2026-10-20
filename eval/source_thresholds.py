@@ -53,7 +53,7 @@ LABEL_PROMPT = (
 
 async def _label_batch(gen: Generator, question: str, papers: list[dict]) -> dict[str, bool]:
     body = "\n\n".join(
-        f'<abstract id="{i}">\n{_neutralise(p["text"][:1200])}\n</abstract>' for i, p in enumerate(papers, 1)
+        f'<abstract id="{i}">\n{_neutralise(p["text"][:800])}\n</abstract>' for i, p in enumerate(papers, 1)
     )
     msgs = [SystemMessage(content=LABEL_PROMPT), HumanMessage(content=f"Question: {question}\n\n{body}")]
     for attempt in range(8):
@@ -83,7 +83,7 @@ async def label(gen: Generator, question: str, papers: list[dict], cache: dict) 
     return labels
 
 
-async def main() -> None:
+async def main(every: int = 1) -> None:
     s = get_settings()
     embedder = Embedder("fastembed", s.embed_model, s.model_cache_dir)
     library = Retriever(embedder, s.cache_dir / "embeddings.npz")
@@ -98,7 +98,9 @@ async def main() -> None:
     rows: list[tuple[str, float, bool]] = []  # (source, score, relevant)
     async with httpx.AsyncClient() as client:
         gen = Generator(s.providers, client, s.llm_timeout)
-        questions = load_questions()
+        # every=2: already-labelled questions plus every second other one (quota-limited runs)
+        questions = [q for i, q in enumerate(load_questions()) if q["question"] in cache or i % every == 0]
+        print(f"{len(questions)} questions")
         for n, q in enumerate(questions, 1):
             gold = set(q.get("gold_document_ids") or [])
             qvec = (await embedder.embed([q["question"]]))[0]
@@ -142,4 +144,8 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--every", type=int, default=1, help="label every Nth question (plus cached ones)")
+    asyncio.run(main(ap.parse_args().every))
