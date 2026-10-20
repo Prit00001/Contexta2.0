@@ -2,6 +2,14 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Vercel deployment (2026-10-20)
+
+### Added
+- `vercel.json`: FastAPI preset, installs the pinned `requirements.txt`, builds the React app and applies migrations at build time, 300 s functions, tests/docs/`node_modules` left out of the bundle, and a daily cron. `.vercelignore`, `[tool.vercel] entrypoint`. Guide: [VERCEL.md](docs/operations/VERCEL.md).
+- `INGEST_INLINE` (default on Vercel): an upload is ingested inside its own request and returns `ready`.
+- `GET /cron/maintenance` (enabled by `CRON_SECRET`): deletes expired conversations and ingests anything queued.
+- On Vercel: storage dir in `/tmp` and a 4 MB upload limit by default.
+
 ## [Unreleased] — Search and AI answer engine visibility (2026-10-20)
 
 ### Added

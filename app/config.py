@@ -137,6 +137,11 @@ class Settings(BaseModel):
     # Run the ingestion worker as a thread inside the API process instead of a separate
     # `python -m services.worker` (for hosts with one service only, e.g. Render's free tier).
     ingest_in_api: bool = False
+    # Ingest an upload inside its own request, before responding (serverless hosts such as Vercel,
+    # where nothing runs between requests). Defaults to true on Vercel.
+    ingest_inline: bool = False
+    # Shared secret for GET /cron/maintenance (Vercel Cron sends it as "Authorization: Bearer ...").
+    cron_secret: str = Field("", repr=False)
 
     # Billing (ADR-007): a free trial of active use per workspace, then a per-seat Razorpay subscription.
     # Off by default: without it nothing is ever paywalled (self-hosting, development).
@@ -244,8 +249,12 @@ def load_settings() -> Settings:
         value = _env(_ENV_NAMES.get(name, name.upper()))
         if value is not None:
             raw[name] = value
-    if "cache_dir" not in raw and os.getenv("VERCEL"):
-        raw["cache_dir"] = "/tmp/contexta-cache"  # Vercel's filesystem is read-only except /tmp
+    if os.getenv("VERCEL"):
+        # Vercel: read-only filesystem except /tmp, 4.5 MB request bodies, nothing runs between requests.
+        raw.setdefault("cache_dir", "/tmp/contexta-cache")
+        raw.setdefault("storage_dir", "/tmp/contexta-storage")  # use STORAGE_BACKEND=supabase: /tmp is per instance
+        raw.setdefault("max_upload_mb", "4")
+        raw.setdefault("ingest_inline", "true")
     if "log_level" in raw:
         raw["log_level"] = str(raw["log_level"]).upper()
     if str(raw.get("rerank_model", "")).lower() in ("none", "off", "false", "0"):

@@ -35,7 +35,7 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 | `EMBED_BACKEND` | `fastembed` | `hash` = deterministic token hashing, no download — tests only |
 | `EMBED_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Must be a fastembed-supported model |
 | `FASTEMBED_CACHE_PATH` | fastembed default | Model cache directory (Docker: `/app/.model_cache`, baked in) |
-| `CACHE_DIR` | `.cache` (`/tmp/contexta-cache` on Vercel) | Library embedding cache (`embeddings.npz`) |
+| `CACHE_DIR` | `.cache` (`/tmp/contexta-cache` on Vercel; there `STORAGE_DIR` is `/tmp/contexta-storage` and `MAX_UPLOAD_MB` is `4`) | Library embedding cache (`embeddings.npz`) |
 | `RERANK_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` | Cross-encoder reranking (P2-07), **on by default** since measured: R@1 0.711 → 0.783, R@5 0.977 → 0.991 for +0.4 s per search and ~120 MB RAM (411 MB peak with both models). Reorders sources that passed `MIN_SCORE`, never adds any. Baked into the Docker image; unloadable → off, reported by `/ready`. `none` disables |
 | `RERANK_CANDIDATES` | `20` | How many retrieved sources the reranker scores before keeping `top_k` |
 | `RERANK_MAX_CHARS` | `500` | Score only the first N characters of each passage when reranking (0 = whole text). Keeps quality, ~2.5× faster on the arXiv path (EVALUATION_REPORT §5g) |
@@ -95,6 +95,8 @@ Traced (`TRACING_ENABLED=true`): FastAPI's own server span (method, route, `url.
 | `BILLING_PRICE_LABEL` | – | Shown on the Billing page, e.g. `₹499 per seat / month` (display only; the plan decides the charge) |
 | `BILLING_TOTAL_COUNT` | `120` | Monthly charges before a subscription ends (Razorpay requires a count) |
 | `INGEST_IN_API` | `false` | Run the ingestion worker as a thread inside the API process (shares its embedding model) instead of a separate `python -m services.worker`. For single-service hosts such as Render's free plan; `render.yaml` sets it |
+| `INGEST_INLINE` | `false` (`true` on Vercel) | Ingest an upload inside its own request, so it returns **ready** (serverless hosts, where nothing runs between requests). See [VERCEL.md](VERCEL.md) |
+| `CRON_SECRET` | – | Enables `GET /cron/maintenance` (delete expired conversations, ingest anything queued) for a scheduler that sends `Authorization: Bearer <secret>`, such as Vercel Cron. Unset → 404 |
 | `MIGRATE_ON_START` | `false` | Docker image only: apply pending `supabase/migrations` (`scripts/migrate.py`) before starting the server, when `DATABASE_URL` is set. A failed migration stops the start. `render.yaml` sets it |
 | `HISTORY_RETENTION_DAYS` | `30` | Stored workspace conversations ([ADR-006](../decisions/ADR-006-conversation-history.md)) are hidden once idle this long and deleted by the worker (`python -m services.worker`, hourly). Only their author can see them; each turn keeps the full source passages, which therefore outlive a deleted document until the thread expires. Apply migration `0003_conversations.sql` (`python scripts/migrate.py`) before upgrading |
 

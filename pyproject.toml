@@ -7,6 +7,10 @@ readme = "README.md"
 
 # Runtime dependencies are managed in requirements.in (direct) -> requirements.txt (pinned lock).
 
+# Vercel: the FastAPI app, dependencies from requirements.txt (vercel.json installCommand).
+[tool.vercel]
+entrypoint = "app.main:app"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"

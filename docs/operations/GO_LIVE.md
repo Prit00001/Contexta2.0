@@ -4,6 +4,8 @@ Takes the Render service from "paper search only" to the full product: accounts,
 document upload, and paid subscriptions after the free hour. About 45 minutes, in this order.
 Paper search keeps working at every step; each block only switches on when its settings are complete.
 
+Deploying on **Vercel** instead of Render: do §1–2 here, then follow [VERCEL.md](VERCEL.md) instead of §3.
+
 Never paste keys into chat, commits or tickets. They go only into the Render dashboard
 (Environment) and, for local testing, your own `.env`.
 

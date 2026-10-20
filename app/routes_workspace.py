@@ -26,6 +26,7 @@ from app.schemas import (
 from core import conversations, db
 from core.followup import MAX_TURNS
 from core.storage import get_storage, safe_filename
+from services import worker
 from services.workspace_qa import ask_workspace
 
 router = APIRouter(prefix="/workspaces/{workspace_id}")
@@ -121,7 +122,19 @@ async def upload_document(
             db.put_pool_conn(pool, conn)
 
     doc_id, needs_ingest = await asyncio.to_thread(_write)
-    return UploadResponse(document_id=str(doc_id), filename=filename, status="queued" if needs_ingest else "ready")
+    status = "queued" if needs_ingest else "ready"
+    if needs_ingest and settings.ingest_inline:  # serverless: nothing would ingest it after we respond
+
+        def _ingest_now():
+            conn = db.get_pool_conn(pool)
+            try:
+                worker.drain(conn, settings)
+                return db.get_document(conn, str(doc_id))["status"]
+            finally:
+                db.put_pool_conn(pool, conn)
+
+        status = await asyncio.to_thread(_ingest_now)
+    return UploadResponse(document_id=str(doc_id), filename=filename, status=status)
 
 
 @router.get("/documents", response_model=list[DocumentOut])

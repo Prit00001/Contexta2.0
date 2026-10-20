@@ -7,6 +7,7 @@
 | Local process | `uvicorn app.main:app` | Verified |
 | Docker image | `Dockerfile` (Python 3.11-slim, lockfile install, model baked in) | Defined; **build not executed** in the Phase 1 environment (Docker Hub blocked). CI builds and smoke-tests it |
 | Docker Compose | `docker-compose.yml` — api, worker, one-shot migrate, Postgres/pgvector | Syntax validated (`docker compose config`); not run |
+| Vercel | `vercel.json` (FastAPI preset, frontend build, migrations, daily cron) | Install + build commands and a read-only start verified locally; see [VERCEL.md](VERCEL.md) |
 | Render (free) | `render.yaml` blueprint, Docker runtime, health check `/health` | Unchanged from baseline; not re-deployed in Phase 1 |
 | Hugging Face Spaces | Docker SDK, `app_port: 8000` in the Space README | Unchanged from baseline |
 

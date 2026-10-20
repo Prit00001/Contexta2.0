@@ -1,0 +1,15 @@
+# Not uploaded to Vercel: local environments, caches and build output (the frontend is built there).
+.venv
+.env
+.cache
+.model_cache
+.storage
+.pytest_cache
+.ruff_cache
+**/__pycache__
+frontend/node_modules
+frontend/dist
+demo-out
+eval/*.json
+eval/*.jsonl
+eval/*.csv

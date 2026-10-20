@@ -81,8 +81,9 @@ async def lifespan(app: FastAPI):
             )
     app.state.workspace_limiter = make_limiter(redis, s.workspace_rate_limit_per_min)
     worker = None
-    if app.state.db_pool and s.ingest_in_api:
+    if app.state.db_pool and (s.ingest_in_api or s.ingest_inline):
         ingestion._embedder = embedder  # share the loaded model instead of loading a second copy
+    if app.state.db_pool and s.ingest_in_api:
         worker = start_in_thread()
     log.info(
         "Ready: %d docs, embeddings=%s%s, LLM providers=%s, db=%s, cache=%s",
