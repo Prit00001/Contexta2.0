@@ -51,6 +51,15 @@ def purge_history(conn, settings) -> int:
 RECONNECT_DELAY_S = 5.0
 
 
+def drain(conn, settings, max_jobs: int = 5) -> int:
+    """Process up to ``max_jobs`` queued jobs now, in the caller's thread. Used where no worker runs
+    between requests (INGEST_INLINE, e.g. Vercel): an upload ingests its own file before responding."""
+    done = 0
+    while done < max_jobs and run_once(conn, settings):
+        done += 1
+    return done
+
+
 def run_forever(poll_interval: float = 2.0, stop: Optional[threading.Event] = None) -> None:
     """Poll for jobs until ``stop`` is set (never, when run as its own process)."""
     settings = get_settings()

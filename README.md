@@ -109,7 +109,8 @@ build it falls back to the original no-build pages in `app/static/`, so a Python
 a UI. Billing for workspaces is opt-in (`BILLING_ENABLED`): a one-hour trial of active use, then a per-seat monthly Razorpay subscription; paper search stays free ([ADR-007](docs/decisions/ADR-007-billing.md)). With `SUPABASE_URL` and `SUPABASE_ANON_KEY` set, people sign up, sign in and reset their password
 by email; otherwise the page asks for a pasted access token. Workspaces need `DATABASE_URL` and the
 ingestion worker (`python -m services.worker`, or `INGEST_IN_API=true` to run it inside the API).
-Deploying everything to Render with Supabase and Razorpay: [GO_LIVE.md](docs/operations/GO_LIVE.md).
+Deploying everything to Render with Supabase and Razorpay: [GO_LIVE.md](docs/operations/GO_LIVE.md); on Vercel:
+[VERCEL.md](docs/operations/VERCEL.md).
 
 The first start downloads the embedding model (cached afterwards). Check `GET /ready`: if `embeddings` is not `ok`, the model couldn't be loaded and retrieval is running on low-quality hash vectors.
 

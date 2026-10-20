@@ -3,6 +3,7 @@ app/routes_workspace.py (document/Q&A endpoints) to keep concerns apart."""
 from __future__ import annotations
 
 import asyncio
+import hmac
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -21,6 +22,7 @@ from app.schemas import (
     WorkspaceOut,
 )
 from core import auth, db
+from services import worker
 
 router = APIRouter()
 
@@ -30,6 +32,29 @@ def _pool(request: Request):
     if pool is None:
         raise HTTPException(503, "Database is not configured (DATABASE_URL not set).")
     return pool
+
+
+@router.get("/cron/maintenance", include_in_schema=False)
+async def cron_maintenance(request: Request):
+    """For schedulers on hosts with no background worker (Vercel Cron sends
+    ``Authorization: Bearer $CRON_SECRET``): delete expired conversations, ingest anything queued."""
+    settings = request.app.state.settings
+    if not settings.cron_secret:
+        raise HTTPException(404, "Not found.")
+    sent = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if not hmac.compare_digest(sent.encode(), settings.cron_secret.encode()):
+        raise HTTPException(401, "Invalid cron secret.")
+    pool = _pool(request)
+
+    def _run():
+        conn = db.get_pool_conn(pool)
+        try:
+            return worker.purge_history(conn, settings), worker.drain(conn, settings, max_jobs=20)
+        finally:
+            db.put_pool_conn(pool, conn)
+
+    purged, ingested = await asyncio.to_thread(_run)
+    return {"conversations_deleted": purged, "documents_ingested": ingested}
 
 
 @router.get("/auth/config", response_model=AuthConfig)
