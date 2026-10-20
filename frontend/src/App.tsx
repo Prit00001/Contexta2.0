@@ -3,6 +3,7 @@ import { useAuth } from "./auth";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Search } from "./pages/Search";
 import { AskView } from "./pages/workspace/AskView";
+import { BillingView } from "./pages/workspace/BillingView";
 import { DocumentsView } from "./pages/workspace/DocumentsView";
 import { KeysView } from "./pages/workspace/KeysView";
 import { MembersView } from "./pages/workspace/MembersView";
@@ -23,6 +24,7 @@ export function App() {
           <Route path="documents" element={<DocumentsView />} />
           <Route path="members" element={<MembersView />} />
           <Route path="keys" element={<KeysView />} />
+          <Route path="billing" element={<BillingView />} />
         </Route>
         <Route path="*" element={<p className="empty">Page not found. <Link to="/">Back to search</Link></p>} />
       </Routes>

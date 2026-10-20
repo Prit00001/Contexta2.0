@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DocumentRow } from "../../api/types";
+import { ApiError } from "../../api/client";
 import { useAuth } from "../../auth";
 import { ROLE_RANK, useWorkspace, when } from "./WorkspaceLayout";
 
 const PENDING = new Set(["queued", "processing"]);
 
 export function DocumentsView() {
-  const { ws, base } = useWorkspace();
+  const { ws, base, refreshBilling } = useWorkspace();
   const { authFetch } = useAuth();
   const [docs, setDocs] = useState<DocumentRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +47,10 @@ export function DocumentsView() {
         await authFetch(`${base}/documents`, { method: "POST", body: fd });
       } catch (e) {
         setError(`${f.name}: ${(e as Error).message}`);
+        if ((e as ApiError).status === 402) {
+          void refreshBilling();
+          break; // the rest would be refused too
+        }
       } finally {
         setUploading((n) => n - 1);
       }

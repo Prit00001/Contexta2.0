@@ -1,3 +1,6 @@
+# One web service runs everything: paper search, workspaces (Supabase Postgres + Auth), the ingestion
+# worker (INGEST_IN_API) and billing. Step-by-step setup: docs/operations/GO_LIVE.md.
+# `sync: false` = a secret you enter in the Render dashboard; it never lives in this file.
 services:
   - type: web
     name: contexta
@@ -5,6 +8,7 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
+      # ---- answers ----
       - key: GROQ_API_KEY
         sync: false
       - key: GEMINI_API_KEY
@@ -13,3 +17,35 @@ services:
         sync: false
       - key: RATE_LIMIT_PER_MIN
         value: "20"
+      - key: LOG_FORMAT
+        value: json
+      # ---- workspaces (Supabase) ----
+      - key: DATABASE_URL # Supabase "Session pooler" connection string (Render has no IPv6)
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: STORAGE_BACKEND # "supabase" once SUPABASE_URL + SUPABASE_SERVICE_KEY are set
+        sync: false
+      - key: MIGRATE_ON_START # only acts when DATABASE_URL is set
+        value: "true"
+      - key: INGEST_IN_API # only acts when the database is connected
+        value: "true"
+      # ---- billing (Razorpay) ----
+      - key: BILLING_ENABLED # "true" once the four Razorpay values below are in
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: RAZORPAY_PLAN_ID
+        sync: false
+      - key: BILLING_PRICE_LABEL
+        sync: false

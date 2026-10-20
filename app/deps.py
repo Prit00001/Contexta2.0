@@ -1,6 +1,9 @@
-"""Auth dependencies for workspace routes: verifies a Supabase JWT (HMAC check against the
-project's JWT secret - no network call) or a workspace API key, then checks the caller's
-membership role for the workspace in the path. This is what closes the Phase 1c "no auth"
+"""Auth dependencies for workspace routes: verifies a Supabase JWT or a workspace API key, then
+checks the caller's membership role for the workspace in the path.
+
+Supabase signs user tokens one of two ways: legacy projects with a shared HS256 secret
+(SUPABASE_JWT_SECRET, checked locally), newer projects with asymmetric "JWT signing keys" (ES256 /
+RS256), whose public keys are fetched from the project's JWKS endpoint (SUPABASE_URL) and cached. This is what closes the Phase 1c "no auth"
 gap - every /workspaces/{workspace_id}/* route now depends on require_role(...)."""
 
 from __future__ import annotations
@@ -18,6 +21,16 @@ from core import db
 from core.auth import ROLE_RANK
 
 _JWT_ALG = "HS256"
+_ASYMMETRIC_ALGS = ["ES256", "RS256"]
+_jwks_clients: dict[str, jwt.PyJWKClient] = {}
+
+
+def _jwks(supabase_url: str) -> jwt.PyJWKClient:
+    url = f"{supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+    if url not in _jwks_clients:
+        # Keys are cached for 10 minutes; an unknown key id (a rotation) triggers one refetch.
+        _jwks_clients[url] = jwt.PyJWKClient(url, lifespan=600, timeout=10)
+    return _jwks_clients[url]
 
 
 @dataclass
@@ -64,11 +77,25 @@ def _require_jwt_secret(settings: Settings) -> None:
 
 
 def _decode_jwt(token: str, settings: Settings) -> dict:
-    _require_jwt_secret(settings)
+    """Blocking (may fetch the JWKS): call from a worker thread."""
     try:
-        claims = jwt.decode(token, settings.supabase_jwt_secret, algorithms=[_JWT_ALG], audience="authenticated")
+        alg = jwt.get_unverified_header(token).get("alg")
+    except jwt.PyJWTError:
+        raise HTTPException(401, "Invalid token.") from None
+    if alg in _ASYMMETRIC_ALGS and not settings.supabase_url:
+        raise HTTPException(503, "Workspace authentication is not configured on this server (SUPABASE_URL).")
+    if alg not in _ASYMMETRIC_ALGS:
+        _require_jwt_secret(settings)
+    try:
+        if alg in _ASYMMETRIC_ALGS:
+            key = _jwks(settings.supabase_url).get_signing_key_from_jwt(token).key
+            claims = jwt.decode(token, key, algorithms=_ASYMMETRIC_ALGS, audience="authenticated")
+        else:
+            claims = jwt.decode(token, settings.supabase_jwt_secret, algorithms=[_JWT_ALG], audience="authenticated")
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token has expired.") from None
+    except jwt.PyJWKClientConnectionError:
+        raise HTTPException(503, "Could not reach the sign-in service to verify the token. Try again.") from None
     except jwt.PyJWTError:
         raise HTTPException(401, "Invalid token.") from None
     if not claims.get("sub"):
@@ -118,5 +145,5 @@ async def require_user(request: Request) -> str:
     if token.count(".") != 2:
         raise HTTPException(401, "A user token (not an API key) is required here.")
     settings: Settings = request.app.state.settings
-    claims = _decode_jwt(token, settings)
+    claims = await asyncio.to_thread(_decode_jwt, token, settings)
     return claims["sub"]

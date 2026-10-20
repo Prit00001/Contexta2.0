@@ -27,6 +27,10 @@ certifi==2026.7.22
     #   httpx
     #   langchain-openai
     #   requests
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'
+    # via
+    #   -c requirements.txt
+    #   cryptography
 charset-normalizer==3.5.2
     # via
     #   -c requirements.txt
@@ -41,6 +45,10 @@ colorama==0.4.6 ; sys_platform == 'win32'
     #   loguru
     #   pytest
     #   tqdm
+cryptography==50.0.2
+    # via
+    #   -c requirements.txt
+    #   pyjwt
 defusedxml==0.7.1
     # via
     #   -c requirements.txt
@@ -288,6 +296,10 @@ py-rust-stemmers==0.1.8
     # via
     #   -c requirements.txt
     #   fastembed
+pycparser==3.11 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+    # via
+    #   -c requirements.txt
+    #   cffi
 pydantic==2.14.1
     # via
     #   -c requirements.txt

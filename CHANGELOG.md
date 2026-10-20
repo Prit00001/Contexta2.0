@@ -2,6 +2,26 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Go live: sign-up and Render setup (2026-10-20)
+
+### Added
+- Sign-up, email confirmation and password reset on `/workspace` (Supabase Auth): "Create an account", "Forgot password?", and a "Choose a new password" step after a reset link. Email links sign the user in and are removed from the URL; expired links say so.
+- Tokens from Supabase's newer JWT signing keys (ES256/RS256) are verified against the project's JWKS; HS256 with `SUPABASE_JWT_SECRET` still works.
+- `INGEST_IN_API=true`: ingestion runs inside the API process (Render's free plan has no background workers). The worker now reconnects when the database drops its connection.
+- `MIGRATE_ON_START=true` (Docker): applies pending migrations before the server starts.
+- `render.yaml` declares every setting for workspaces and billing; [GO_LIVE.md](docs/operations/GO_LIVE.md) walks through Supabase, Razorpay and Render, then a test-payment checklist.
+
+### Fixed
+- Adding a member by email asked Supabase's admin API for `?email=`, which it ignores, and took the first user returned: on a real Supabase project that could add the wrong person. It now uses the `filter` parameter and requires an exact email match.
+
+## [Unreleased] — Workspace billing (2026-10-19)
+
+### Added
+- Billing for workspaces ([ADR-007](docs/decisions/ADR-007-billing.md)), off unless `BILLING_ENABLED=true`: one hour of active use free per workspace (idle time never counts), then a per-seat monthly Razorpay subscription. After the trial, asking and uploading return 402; everything stays readable; paper search stays free.
+- `GET /workspaces/{id}/billing`, `POST /workspaces/{id}/activity` (trial heartbeat), `POST .../billing/subscribe`, `.../billing/verify` (Checkout signature), `.../billing/cancel`, and the signed Razorpay webhook `POST /billing/razorpay/webhook`. Member changes update the seat count from the next renewal.
+- Frontend: a trial banner with minutes left, a Billing page with Razorpay Checkout, and paywall messages on ask and upload.
+- Migration `0004_billing.sql`.
+
 ## [Unreleased] — React frontend (P2-12) (2026-10-19)
 
 ### Added

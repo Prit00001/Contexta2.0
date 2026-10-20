@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.observability import RequestContextMiddleware, configure_logging
 from app.routes import router
 from app.routes_admin import router as admin_router
+from app.routes_billing import router as billing_router
 from app.routes_workspace import router as workspace_router
 from core import db, tracing
 from core.cache import make_answer_cache
@@ -23,8 +24,10 @@ from core.rate_limit import make_limiter, make_redis
 from core.reranker import Reranker
 from core.retriever import Retriever
 from data.documents import DOCUMENTS
+from services import ingestion
 from services.arxiv_client import ArxivClient
 from services.search_service import SearchService
+from services.worker import start_in_thread
 
 STATIC = Path(__file__).parent / "static"
 # The React app (frontend/, `pnpm build`). When it isn't built - e.g. a Python-only dev setup - the
@@ -49,6 +52,7 @@ async def lifespan(app: FastAPI):
     generator = Generator(s.providers, client, s.llm_timeout)
     arxiv = ArxivClient(client, s.arxiv_max_results, s.arxiv_cache_ttl)
     app.state.settings = s
+    app.state.http = client  # shared outbound client (Razorpay, ...); tests swap its transport
     app.state.embedder, app.state.retriever, app.state.generator = embedder, retriever, generator
     redis = make_redis(s.redis_url)  # shared answer cache + rate limits across instances (P2-FR-07)
     app.state.redis = redis
@@ -74,17 +78,27 @@ async def lifespan(app: FastAPI):
                 extra={"event": "startup.db", "status": "error", "category": "internal"},
             )
     app.state.workspace_limiter = make_limiter(redis, s.workspace_rate_limit_per_min)
+    worker = None
+    if app.state.db_pool and s.ingest_in_api:
+        ingestion._embedder = embedder  # share the loaded model instead of loading a second copy
+        worker = start_in_thread()
     log.info(
         "Ready: %d docs, embeddings=%s%s, LLM providers=%s, db=%s, cache=%s",
         retriever.size,
         embedder.backend,
         " (FALLBACK)" if embedder.degraded else "",
         generator.provider_names or "none (extractive mode)",
-        "connected" if app.state.db_pool else ("UNREACHABLE" if s.database_url else "not configured"),
+        ("connected" + (" + ingest worker" if worker else ""))
+        if app.state.db_pool
+        else ("UNREACHABLE" if s.database_url else "not configured"),
         "redis" if redis is not None else "memory",
         extra={"event": "startup", "status": "degraded" if embedder.degraded else "ok"},
     )
     yield
+    if worker:
+        thread, stop = worker
+        stop.set()
+        thread.join(timeout=10)
     tracing.shutdown_tracing()
     await client.aclose()
     if redis is not None:
@@ -118,6 +132,7 @@ def create_app(http_transport: httpx.AsyncBaseTransport | None = None) -> FastAP
     app.include_router(router)
     app.include_router(admin_router)
     app.include_router(workspace_router)
+    app.include_router(billing_router)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     if (FRONTEND_DIST / "index.html").exists():
