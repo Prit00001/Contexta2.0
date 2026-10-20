@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>About Contexta: $tagline</title>
+<meta name="description" content="$description">
+<link rel="canonical" href="$base/about">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Contexta">
+<meta property="og:title" content="About Contexta">
+<meta property="og:description" content="$description">
+<meta property="og:url" content="$base/about">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='14' cy='14' r='8' fill='none' stroke='%234f46e5' stroke-width='3'/><path d='M20 20l7 7' stroke='%234f46e5' stroke-width='3' stroke-linecap='round'/></svg>">
+<script type="application/ld+json">$app_ld</script>
+<script type="application/ld+json">$faq_ld</script>
+<style>
+:root { --bg: #fafafa; --field: #fff; --ink: #18181b; --muted: #71717a; --line: #e4e4e7; --accent: #4f46e5; --accent-ink: #fff; --accent-soft: #eef2ff;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; color-scheme: light }
+@media (prefers-color-scheme: dark) { :root { --bg: #0c0c0e; --field: #141417; --ink: #ececef; --muted: #a1a1aa; --line: #27272c; --accent: #a5b4fc; --accent-ink: #0c0c0e; --accent-soft: #1e1b3a; color-scheme: dark } }
+* { box-sizing: border-box }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.65 var(--font) }
+a { color: var(--accent) }
+nav { display: flex; gap: 20px; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line) }
+nav .brand { font-weight: 650; color: var(--ink); text-decoration: none; margin-right: auto }
+nav a { text-decoration: none; font-size: 15px }
+main { max-width: 720px; margin: 0 auto; padding: 40px 16px 72px }
+h1 { font-size: clamp(26px, 5vw, 34px); line-height: 1.2; letter-spacing: -.02em; margin: 0 0 12px; text-wrap: balance }
+h2 { font-size: 21px; letter-spacing: -.01em; margin: 44px 0 10px }
+.lede { font-size: 18px; color: var(--muted); margin: 0 0 24px }
+.cta { display: inline-block; background: var(--accent); color: var(--accent-ink); padding: 10px 18px; border-radius: 10px; font-weight: 600; text-decoration: none }
+ol, ul { padding-left: 22px }
+li { margin: 6px 0 }
+.papers { columns: 2 260px; column-gap: 32px; font-size: 15px }
+.papers li { break-inside: avoid; margin: 4px 0 }
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px }
+.plan { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; background: var(--field) }
+.plan h3 { margin: 0 0 4px; font-size: 17px }
+.plan p { margin: 0; color: var(--muted); font-size: 15px }
+details { border-bottom: 1px solid var(--line); padding: 12px 0 }
+summary { cursor: pointer; font-weight: 600 }
+details p { margin: 8px 0 0; color: var(--muted) }
+footer { color: var(--muted); font-size: 14px; margin-top: 56px }
+</style>
+</head>
+<body>
+<nav aria-label="Main"><a class="brand" href="/">Contexta</a><a href="/">Ask a question</a><a href="/workspace">Workspace</a></nav>
+<main>
+  <h1>Contexta: $tagline</h1>
+  <p class="lede">$description</p>
+  <p><a class="cta" href="/">Ask a research question</a></p>
+
+  <h2>How it works</h2>
+  <ol>
+    <li><strong>Retrieve.</strong> Your question is matched against a library of $n_papers landmark papers and, optionally, live arXiv search, or against a PDF you upload.</li>
+    <li><strong>Rerank.</strong> A cross-encoder model reorders the best passages so the most relevant evidence comes first.</li>
+    <li><strong>Answer with citations.</strong> A language model writes the answer using only those passages and cites each claim with a numbered source.</li>
+    <li><strong>Check.</strong> Every citation is matched to a retrieved source; invalid ones are removed and reported, and uncited sentences are marked. With no relevant evidence, Contexta says so instead of guessing.</li>
+  </ol>
+  <p>Follow-up questions keep the context of the previous ones, and each citation opens the exact passage it came from.</p>
+
+  <h2>Questions you can ask</h2>
+  <ul>
+    <li><a href="/?q=What%20makes%20LoRA%20cheaper%20than%20full%20fine-tuning%3F" rel="nofollow">What makes LoRA cheaper than full fine-tuning?</a></li>
+    <li><a href="/?q=How%20does%20retrieval-augmented%20generation%20differ%20from%20fine-tuning%3F" rel="nofollow">How does retrieval-augmented generation differ from fine-tuning?</a></li>
+    <li><a href="/?q=What%20did%20the%20Chinchilla%20paper%20change%20about%20scaling%20laws%3F" rel="nofollow">What did the Chinchilla paper change about scaling laws?</a></li>
+    <li><a href="/?q=How%20does%20FlashAttention%20reduce%20memory%20use%3F" rel="nofollow">How does FlashAttention reduce memory use?</a></li>
+  </ul>
+
+  <h2>Workspaces for your team's documents</h2>
+  <p>Create a workspace to ask questions over your own PDF, DOCX, TXT and Markdown files with the same cited answers. Admins add teammates as admin, member or viewer and can create API keys. Saved conversations are private to their author and deleted 30 days after the last message.</p>
+
+  <h2>Pricing</h2>
+  <div class="plans">
+    <div class="plan"><h3>Paper search</h3><p>Free, no account needed.</p></div>
+    <div class="plan"><h3>Team workspace</h3><p>Free for one hour of active use, $price. Idle time never counts.</p></div>
+  </div>
+
+  <h2>Papers in the library</h2>
+  <ul class="papers">$papers</ul>
+
+  <h2>Frequently asked questions</h2>
+  $faq
+
+  <footer>Updated $updated · <a href="/">Contexta</a></footer>
+</main>
+</body>
+</html>

@@ -2,6 +2,15 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Search and AI answer engine visibility (2026-10-20)
+
+### Added
+- `/about`: server-rendered page with what Contexta is, how it works, pricing, the 25 library papers and an FAQ, with `WebApplication` and `FAQPage` structured data (JSON-LD). Most AI crawlers don't run JavaScript, so this is what they can read and quote.
+- `/robots.txt` (private pages and `?q=` answer links excluded), `/sitemap.xml`, `/llms.txt` (a Markdown map of the site for language models). All use `APP_SITE_URL`, else the forwarded host.
+- The app shell has a real title, description, canonical and Open Graph tags, structured data, and readable content before JavaScript loads. Workspace pages send `X-Robots-Tag: noindex`.
+- `/?q=…` links open the search page and ask that question; asking a new question updates the link so it can be shared. Per-page titles, an About link in the nav, and HEAD support on public pages.
+- GO_LIVE.md §5: after-deploy steps (Search Console, Bing Webmaster Tools, rich results check, keeping the free instance awake, getting mentioned, measuring).
+
 ## [Unreleased] — Go live: sign-up and Render setup (2026-10-20)
 
 ### Added

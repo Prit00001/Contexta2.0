@@ -72,6 +72,7 @@ Work in **Test Mode** (toggle at the top of the dashboard) until a test payment 
    | `RAZORPAY_PLAN_ID` | `plan_…` |
    | `BILLING_PRICE_LABEL` | e.g. `₹499 per seat / month` |
    | `BILLING_ENABLED` | `true` |
+   | `APP_SITE_URL` | your public address, e.g. `https://contexta.onrender.com` or your own domain (no trailing slash): used in the sitemap, canonical links and search previews |
 
    `MIGRATE_ON_START=true` and `INGEST_IN_API=true` come from `render.yaml` (the free plan has no
    background workers, so the API process also ingests uploads).
@@ -94,6 +95,33 @@ Work in **Test Mode** (toggle at the top of the dashboard) until a test payment 
 When all of that passes: switch Razorpay to **Live Mode**, generate live keys, create the same plan
 and webhook in live mode, replace the four `RAZORPAY_*` values on Render, and redeploy. Razorpay
 must have activated your account for live payments (KYC) first.
+
+## 5. Get found: search engines and AI answer engines
+
+The app already serves what crawlers need: `/about` (what Contexta is, pricing, the paper list and an
+FAQ, as plain HTML with structured data), `/robots.txt`, `/sitemap.xml` and `/llms.txt`. Workspace
+pages are marked `noindex`. After the first deploy:
+
+1. **Your own domain** (optional, recommended): Render → Settings → Custom Domains. Then set
+   `APP_SITE_URL` to it. Changing domains later costs the rankings you built on the old one.
+2. **Google Search Console** ([search.google.com/search-console](https://search.google.com/search-console)):
+   add the site, verify it (DNS record for a custom domain, or the HTML-tag method), then
+   **Sitemaps → submit** `sitemap.xml`. Use **URL inspection** on `/` and `/about` and request indexing.
+3. **Bing Webmaster Tools** ([bing.com/webmasters](https://www.bing.com/webmasters)): import from
+   Search Console in one click. Bing's index also feeds ChatGPT search and Microsoft Copilot.
+4. **Check structured data**: [Rich Results Test](https://search.google.com/test/rich-results) on
+   `/about` should find the FAQ and the web application.
+5. **Keep it awake**: Render's free plan sleeps after 15 idle minutes and the first request then takes
+   ~30 s or more. Crawlers that time out index nothing. Use an uptime monitor that pings `/health`
+   every 10 minutes, or a paid instance.
+6. **Be mentioned where people and AI models look**: list Contexta on Product Hunt, "awesome RAG" /
+   "awesome LLM" lists on GitHub, and answer relevant questions on Reddit and Stack Overflow with a link.
+   Answer engines cite pages that other sites cite.
+7. **Measure** after 2-4 weeks: Search Console → Performance (queries and clicks), and ask ChatGPT,
+   Perplexity and Gemini questions like "tool that answers ML research questions with citations" to see
+   whether Contexta is mentioned.
+
+When the public pages change, bump `CONTENT_UPDATED` in `app/seo.py` so the sitemap reports it.
 
 ## If something fails
 

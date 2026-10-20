@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +16,8 @@ from app.routes import router
 from app.routes_admin import router as admin_router
 from app.routes_billing import router as billing_router
 from app.routes_workspace import router as workspace_router
+from app.seo import render_shell
+from app.seo import router as seo_router
 from core import db, tracing
 from core.cache import make_answer_cache
 from core.embeddings import Embedder
@@ -133,17 +135,18 @@ def create_app(http_transport: httpx.AsyncBaseTransport | None = None) -> FastAP
     app.include_router(admin_router)
     app.include_router(workspace_router)
     app.include_router(billing_router)
+    app.include_router(seo_router)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     if (FRONTEND_DIST / "index.html").exists():
         app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
         spa = FRONTEND_DIST / "index.html"
 
-        @app.get("/", include_in_schema=False)
-        @app.get("/workspace", include_in_schema=False)
-        @app.get("/workspace/{_path:path}", include_in_schema=False)
-        async def spa_page(_path: str = ""):
-            return FileResponse(spa)  # client-side routing (react-router) takes it from here
+        @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+        @app.api_route("/workspace", methods=["GET", "HEAD"], include_in_schema=False)
+        @app.api_route("/workspace/{_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+        async def spa_page(request: Request, _path: str = ""):
+            return render_shell(request, spa)  # client-side routing (react-router) takes it from here
 
     else:
 

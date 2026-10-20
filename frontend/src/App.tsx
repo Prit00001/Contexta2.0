@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./auth";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -9,8 +10,13 @@ import { KeysView } from "./pages/workspace/KeysView";
 import { MembersView } from "./pages/workspace/MembersView";
 import { WorkspaceHome, WorkspaceLayout } from "./pages/workspace/WorkspaceLayout";
 
+const HOME_TITLE = "Contexta: cited answers to ML and NLP research questions";
+
 export function App() {
   const { pathname } = useLocation();
+  useEffect(() => {
+    document.title = pathname.startsWith("/workspace") ? "Workspace · Contexta" : HOME_TITLE;
+  }, [pathname]);
   return (
     <>
       <Nav />
@@ -47,6 +53,9 @@ function Nav() {
       <NavLink to="/workspace" className={cls}>
         Workspace
       </NavLink>
+      <a href="/about" className="navlink">
+        About
+      </a>
       {session && (
         <span className="who">
           <span className="email">{session.email || "Signed in"}</span>

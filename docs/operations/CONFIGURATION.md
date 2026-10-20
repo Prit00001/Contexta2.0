@@ -56,7 +56,7 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 | `TRUST_PROXY_HEADERS` | `true` | Use the right-most `X-Forwarded-For` hop (the one your platform's proxy appends). Set `false` when clients connect directly |
 | `ANSWER_CACHE_TTL` | `3600` | Seconds; only LLM answers (and empty results) are cached. In Redis (shared) when `REDIS_URL` is set, else per process |
 | `ALLOWED_ORIGINS` | `*` | CORS, comma-separated |
-| `APP_SITE_URL` | `http://localhost:8000` | Sent to OpenRouter |
+| `APP_SITE_URL` | `http://localhost:8000` | The public address (no trailing slash): canonical links, Open Graph URLs, `sitemap.xml`, `robots.txt` and `llms.txt` use it, and it is sent to OpenRouter. Left at a localhost value, those pages use the request's forwarded host instead |
 | `MAX_PDF_MB` | `4` | `/ask-pdf` upload limit (Vercel rejects bodies > ~4.5 MB) |
 | `MAX_PDF_CHUNKS` | `300` | Longer PDFs are truncated with a warning |
 
