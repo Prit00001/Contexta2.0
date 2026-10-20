@@ -24,8 +24,10 @@ from core.rate_limit import make_limiter, make_redis
 from core.reranker import Reranker
 from core.retriever import Retriever
 from data.documents import DOCUMENTS
+from services import ingestion
 from services.arxiv_client import ArxivClient
 from services.search_service import SearchService
+from services.worker import start_in_thread
 
 STATIC = Path(__file__).parent / "static"
 # The React app (frontend/, `pnpm build`). When it isn't built - e.g. a Python-only dev setup - the
@@ -76,17 +78,27 @@ async def lifespan(app: FastAPI):
                 extra={"event": "startup.db", "status": "error", "category": "internal"},
             )
     app.state.workspace_limiter = make_limiter(redis, s.workspace_rate_limit_per_min)
+    worker = None
+    if app.state.db_pool and s.ingest_in_api:
+        ingestion._embedder = embedder  # share the loaded model instead of loading a second copy
+        worker = start_in_thread()
     log.info(
         "Ready: %d docs, embeddings=%s%s, LLM providers=%s, db=%s, cache=%s",
         retriever.size,
         embedder.backend,
         " (FALLBACK)" if embedder.degraded else "",
         generator.provider_names or "none (extractive mode)",
-        "connected" if app.state.db_pool else ("UNREACHABLE" if s.database_url else "not configured"),
+        ("connected" + (" + ingest worker" if worker else ""))
+        if app.state.db_pool
+        else ("UNREACHABLE" if s.database_url else "not configured"),
         "redis" if redis is not None else "memory",
         extra={"event": "startup", "status": "degraded" if embedder.degraded else "ok"},
     )
     yield
+    if worker:
+        thread, stop = worker
+        stop.set()
+        thread.join(timeout=10)
     tracing.shutdown_tracing()
     await client.aclose()
     if redis is not None:

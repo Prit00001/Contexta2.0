@@ -2,6 +2,18 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Go live: sign-up and Render setup (2026-10-20)
+
+### Added
+- Sign-up, email confirmation and password reset on `/workspace` (Supabase Auth): "Create an account", "Forgot password?", and a "Choose a new password" step after a reset link. Email links sign the user in and are removed from the URL; expired links say so.
+- Tokens from Supabase's newer JWT signing keys (ES256/RS256) are verified against the project's JWKS; HS256 with `SUPABASE_JWT_SECRET` still works.
+- `INGEST_IN_API=true`: ingestion runs inside the API process (Render's free plan has no background workers). The worker now reconnects when the database drops its connection.
+- `MIGRATE_ON_START=true` (Docker): applies pending migrations before the server starts.
+- `render.yaml` declares every setting for workspaces and billing; [GO_LIVE.md](docs/operations/GO_LIVE.md) walks through Supabase, Razorpay and Render, then a test-payment checklist.
+
+### Fixed
+- Adding a member by email asked Supabase's admin API for `?email=`, which it ignores, and took the first user returned: on a real Supabase project that could add the wrong person. It now uses the `filter` parameter and requires an exact email match.
+
 ## [Unreleased] — Workspace billing (2026-10-19)
 
 ### Added

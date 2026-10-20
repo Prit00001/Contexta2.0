@@ -30,7 +30,7 @@ const remember = (id?: string) => {
 
 /** Loads the user's workspaces; null while loading. */
 function useWorkspaces() {
-  const { authFetch, session } = useAuth();
+  const { authFetch, session, recovery } = useAuth();
   const [list, setList] = useState<Workspace[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reload = useCallback(async () => {
@@ -42,18 +42,18 @@ function useWorkspaces() {
     }
   }, [authFetch]);
   useEffect(() => {
-    if (session) void reload();
-  }, [session, reload]);
+    if (session && !recovery) void reload(); // after a reset link, only once the new password is set
+  }, [session, recovery, reload]);
   return { list, error, reload };
 }
 
 /** /workspace: sign in, then go to the remembered workspace (or create the first one). */
 export function WorkspaceHome() {
-  const { session, config, configError } = useAuth();
+  const { session, recovery, config, configError } = useAuth();
   const { list, error, reload } = useWorkspaces();
   if (configError) return <p className="err center">{configError}</p>;
   if (!config) return null;
-  if (!session) return <SignIn />;
+  if (!session || recovery) return <SignIn />;
   if (error) return <p className="err center">{error}</p>;
   if (!list) return null;
   if (!list.length) return <CreateWorkspace first onCreated={reload} />;
@@ -63,7 +63,7 @@ export function WorkspaceHome() {
 
 export function WorkspaceLayout() {
   const { wsId } = useParams();
-  const { session, config, authFetch } = useAuth();
+  const { session, recovery, config, authFetch } = useAuth();
   const { list, error, reload } = useWorkspaces();
   const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
   const [creating, setCreating] = useState(false);
@@ -89,7 +89,7 @@ export function WorkspaceLayout() {
   }, [ws, reloadConversations]);
 
   if (!config) return null;
-  if (!session) return <SignIn />;
+  if (!session || recovery) return <SignIn />;
   if (error) return <p className="err center">{error}</p>;
   if (!list) return null;
   if (!ws) return <p className="empty">This workspace doesn't exist or you're not a member. <Link to="/workspace">Your workspaces</Link></p>;

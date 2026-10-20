@@ -48,5 +48,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('PORT', '8000'), timeout=4)" || exit 1
 
-# One worker keeps RAM under Render's 512 MB free tier.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
+# One worker keeps RAM under Render's 512 MB free tier. MIGRATE_ON_START=true applies pending SQL
+# migrations first when DATABASE_URL is set (single-instance hosts without a separate release step);
+# a failed migration stops the start instead of serving against the wrong schema.
+CMD ["sh", "-c", "{ [ \"$MIGRATE_ON_START\" != true ] || [ -z \"$DATABASE_URL\" ] || python scripts/migrate.py; } && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]

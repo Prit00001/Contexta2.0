@@ -78,9 +78,9 @@ Traced (`TRACING_ENABLED=true`): FastAPI's own server span (method, route, `url.
 | Variable | Default | Notes |
 |---|---|---|
 | `DATABASE_URL` | – | Postgres with pgvector. Unset → workspace routes return 503. Unreachable at startup → public API still starts, `/ready` shows `database: unreachable` |
-| `SUPABASE_JWT_SECRET` | – | Required for workspace auth; unset → workspace JWT routes return 503 |
+| `SUPABASE_JWT_SECRET` | – | Verifies HS256 user tokens (Supabase projects on the legacy JWT secret); unset → such tokens get 503. Projects on the newer JWT signing keys issue ES256/RS256 tokens, verified against `SUPABASE_URL/auth/v1/.well-known/jwks.json` (public keys cached 10 min) and need only `SUPABASE_URL` |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | – | Member lookup; Supabase storage |
-| `SUPABASE_ANON_KEY` | – | Supabase's public client key. With `SUPABASE_URL`, the `/workspace` page signs users in with email + password; without it, the page asks for a pasted access token (local/dev). Served by `GET /auth/config` (public by design; the service key and JWT secret never are) |
+| `SUPABASE_ANON_KEY` | – | Supabase's public client key. With `SUPABASE_URL`, the `/workspace` page offers email + password sign-in, sign-up and password reset (email links return to `/workspace`: add it to the project's Redirect URLs); without it, the page asks for a pasted access token (local/dev). Served by `GET /auth/config` (public by design; the service key and JWT secret never are) |
 | `STORAGE_BACKEND` | `local` | `local` or `supabase` (requires the two above) |
 | `STORAGE_DIR` | `.storage` | Local backend root |
 | `STORAGE_BUCKET` | `documents` | Supabase bucket |
@@ -94,6 +94,8 @@ Traced (`TRACING_ENABLED=true`): FastAPI's own server span (method, route, `url.
 | `RAZORPAY_WEBHOOK_SECRET` | – | Secret of the webhook pointed at `https://<your-app>/billing/razorpay/webhook` with the subscription events enabled |
 | `BILLING_PRICE_LABEL` | – | Shown on the Billing page, e.g. `₹499 per seat / month` (display only; the plan decides the charge) |
 | `BILLING_TOTAL_COUNT` | `120` | Monthly charges before a subscription ends (Razorpay requires a count) |
+| `INGEST_IN_API` | `false` | Run the ingestion worker as a thread inside the API process (shares its embedding model) instead of a separate `python -m services.worker`. For single-service hosts such as Render's free plan; `render.yaml` sets it |
+| `MIGRATE_ON_START` | `false` | Docker image only: apply pending `supabase/migrations` (`scripts/migrate.py`) before starting the server, when `DATABASE_URL` is set. A failed migration stops the start. `render.yaml` sets it |
 | `HISTORY_RETENTION_DAYS` | `30` | Stored workspace conversations ([ADR-006](../decisions/ADR-006-conversation-history.md)) are hidden once idle this long and deleted by the worker (`python -m services.worker`, hourly). Only their author can see them; each turn keeps the full source passages, which therefore outlive a deleted document until the thread expires. Apply migration `0003_conversations.sql` (`python scripts/migrate.py`) before upgrading |
 
 ## Safe local setup

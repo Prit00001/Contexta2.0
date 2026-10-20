@@ -134,6 +134,9 @@ class Settings(BaseModel):
     workspace_rate_limit_per_min: int = Field(60, ge=0)
     # Stored workspace conversations (P2-14, ADR-006): deleted this many days after the last turn
     history_retention_days: int = Field(30, ge=1, le=3650)
+    # Run the ingestion worker as a thread inside the API process instead of a separate
+    # `python -m services.worker` (for hosts with one service only, e.g. Render's free tier).
+    ingest_in_api: bool = False
 
     # Billing (ADR-007): a free trial of active use per workspace, then a per-seat Razorpay subscription.
     # Off by default: without it nothing is ever paywalled (self-hosting, development).

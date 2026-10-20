@@ -24,6 +24,8 @@ Inputs that determine the build: the git commit, `requirements.txt` (exact pins)
 
 ### Render
 
+Full product (workspaces, sign-up, billing): follow [GO_LIVE.md](GO_LIVE.md). Paper search only:
+
 1. Push the repository to GitHub; Render → New → Blueprint (reads `render.yaml`).
 2. Set provider keys as secret env vars in the dashboard; optionally `REQUIRE_LLM=true`, `LOG_FORMAT=json`.
 3. Render's health check uses `/health`. Use `/ready` in your own monitoring to detect degraded quality.
