@@ -436,6 +436,49 @@ Reading:
   in 5 of 7 decisive pairs: a slight position bias, which the random order spreads evenly across both
   settings. This is not a substitute for arXiv-aware gold labels.
 
+## 5j. Hallucination checks: figures, LLM judge, repair (2026-10-20)
+
+**Question.** How many claims that their cited source does *not* support do the claim checks catch,
+and how often do they flag claims that are fine?
+
+**Setup.** `eval/claim_check_bench.py`. The 250 real claims in `eval/claims_to_label.csv` (sentences
+gpt-oss-120b wrote, each with the passage it cited) are the "original" cases. Negatives with a known
+answer are made from them: **wrong source** (the same claim paired with another paper's passage, 250),
+**wrong number** (a figure above 12 changed, e.g. 175 → 350 billion, 39), **flipped** (a direction word
+flipped, e.g. reduces → increases, 87). The judge is the production prompt on Groq gpt-oss-120b, 8
+claims per call, cached in `eval/claim_bench_cache.jsonl`. A local verdict stands; the judge decides the rest.
+
+| Check | Flagged: original claims | Caught: wrong source | Caught: wrong number | Caught: flipped |
+| --- | --- | --- | --- | --- |
+| `quote` (verbatim only, the old local check) | 0/250 (0%) | 0/250 (0%) | 0/39 (0%) | 0/87 (0%) |
+| `numbers` (quote + figures; `CLAIM_CHECK=local`, default) | 0/250 (0%) | 37/250 (15%) | 39/39 (100%) | 0/87 (0%) |
+| `judge` (quote + LLM judge; the old `CLAIM_CHECK=llm`) | 17/250 (7%) | 245/250 (98%) | 39/39 (100%) | 67/87 (77%) |
+| `full` (quote + figures + judge; `CLAIM_CHECK=llm` now) | 17/250 (7%) | 246/250 (98%) | 39/39 (100%) | 67/87 (77%) |
+
+**The 17 flagged originals were read one by one:** 13 are genuine — the model added facts its cited
+passage does not contain (negative sampling cited to the Word2Vec abstract, FlashAttention's O(L²)
+memory cited to the Transformer passage, RLHF cited to GPT-3). About 4 are borderline: the claim
+draws on a second cited passage that the benchmark's sheet truncates. So the judge's false-alarm rate
+is ≈2%, and **≈5% of real claims are unsupported by their cited text** — invisible to marker checks.
+
+**What this means.**
+- The figure check is free and precise: every changed figure caught, no false alarm on 250 real claims
+  (one false alarm, "13-billion-parameter" vs "LLaMA-13B", was fixed during development by reading
+  figures inside model names on the source side). It is now on by default.
+- Only the judge catches wrong-source citations and claims from the model's own knowledge. It costs one
+  more model call per uncached answer (plus a repair call for answers it flags), which matters on free
+  quotas (this run hit Groq's free-tier rate limit repeatedly). Turn on `CLAIM_CHECK=llm` when quota
+  allows; it is the single biggest accuracy lever measured here.
+- Flipped directions remain the hardest case (77%): some flips are still plausible against a short passage.
+
+**Limits.** The negatives are synthetic; the originals were judged by one reader (the developer of the
+check), not independent labellers; one judge model; claims are judged one passage at a time.
+
+**Repair (`CLAIM_REPAIR`).** Covered by tests, not yet measured on real answers: a flagged answer is
+rewritten once with feedback naming the sentences, and the rewrite is kept only if it has fewer
+unsupported claims. Next step: run it on the 141 questions with `CLAIM_CHECK=llm` and count flagged
+sentences before and after.
+
 ## 6. Known limitations of this dataset
 
 - Unreviewed (see §1) — treat as provisional.

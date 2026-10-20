@@ -244,7 +244,7 @@ Current: **305 passed** (Python 3.13, with Postgres 16 + pgvector and a local `r
 
 ## Known limitations
 
-- Citation validation is **marker-level** by default: it proves `[n]` points to a retrieved source, not that the source supports the claim (`verification: "marker_only"`). `CLAIM_CHECK=llm` adds an LLM-judge support check; its accuracy is unmeasured until `docs/evaluation/claims_to_label.csv` is human-labelled.
+- Claim checks are partial by default: `CLAIM_CHECK=local` (free) catches figures a cited source doesn't contain, but not a claim drawn from the model's own knowledge or a citation to the wrong passage. Measured on real answers, ≈5% of claims are unsupported by their cited text; only `CLAIM_CHECK=llm` (+1 model call per answer) catches those (98% of wrong-source citations, EVALUATION_REPORT §5j).
 - Measured with a real LLM (Groq gpt-oss, EVALUATION_REPORT §5e): citation precision 0.99 single-fact / 0.97 comparison but **0.72 on paraphrased questions**; abstention on out-of-library questions 0.94 after the fix (0.06 before).
 - Keyword-stuffed decoy abstracts outrank the right paper for ~9 in 10 questions with every retriever on MiniLM; reranking and query rewriting reduce that (EVALUATION_REPORT §5d.3, §5f).
 - `MIN_SCORE` is calibrated on the LLM-drafted, unreviewed eval set; recheck after the human review.
