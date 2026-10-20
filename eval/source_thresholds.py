@@ -51,10 +51,7 @@ LABEL_PROMPT = (
 )
 
 
-async def label(gen: Generator, question: str, papers: list[dict], cache: dict) -> dict[str, bool]:
-    key = question
-    if key in cache:
-        return cache[key]
+async def _label_batch(gen: Generator, question: str, papers: list[dict]) -> dict[str, bool]:
     body = "\n\n".join(
         f'<abstract id="{i}">\n{_neutralise(p["text"][:1200])}\n</abstract>' for i, p in enumerate(papers, 1)
     )
@@ -65,15 +62,25 @@ async def label(gen: Generator, question: str, papers: list[dict], cache: dict) 
             data = json.loads(text[text.index("{") : text.rindex("}") + 1]) if text else None
             labels = {papers[int(x["id"]) - 1]["id"]: bool(x["useful"]) for x in data["labels"]}
             if len(labels) == len(papers):
-                cache[key] = labels
-                with CACHE.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps({"q": key, "labels": labels}) + "\n")
                 return labels
         except (ValueError, KeyError, TypeError, IndexError):
             pass
         gen._cooldown_until.clear()
         await asyncio.sleep(min(60, 8 * 2**attempt))
     raise SystemExit(f"labelling kept failing for: {question!r}; rerun (progress is cached)")
+
+
+async def label(gen: Generator, question: str, papers: list[dict], cache: dict) -> dict[str, bool]:
+    """Labels for every paper, 6 abstracts per call (long lists made the model drop or renumber ids)."""
+    if question in cache:
+        return cache[question]
+    labels: dict[str, bool] = {}
+    for start in range(0, len(papers), 6):
+        labels |= await _label_batch(gen, question, papers[start : start + 6])
+    cache[question] = labels
+    with CACHE.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"q": question, "labels": labels}) + "\n")
+    return labels
 
 
 async def main() -> None:

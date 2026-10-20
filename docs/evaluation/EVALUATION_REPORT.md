@@ -479,6 +479,67 @@ rewritten once with feedback naming the sentences, and the rewrite is kept only 
 unsupported claims. Next step: run it on the 141 questions with `CLAIM_CHECK=llm` and count flagged
 sentences before and after.
 
+## 5l. Sufficient-context check before answering (2026-10-20)
+
+**Source.** Joren et al., *Sufficient Context: A New Lens on Retrieval Augmented Generation Systems*
+(ICLR 2025, [arXiv 2411.06037](https://arxiv.org/abs/2411.06037)): large models answer instead of
+abstaining when the retrieved context is insufficient; checking sufficiency first raised the share of
+correct answers among responses by 2–10%.
+
+**Implementation.** `SUFFICIENCY_CHECK=llm` adds `check_context` between retrieval and generation
+(`core/sufficiency.py`): one call classifies the passages as `sufficient` / `partial` / `insufficient`.
+Only `insufficient` abstains, naming what the passages lack; `partial` still answers (the paper found
+partial context often helps); a failed or unparseable check never abstains.
+
+**Setup.** `/ask`'s real default path replayed: library + arXiv (frozen snapshot) + cross-encoder
+reranker, `MIN_SCORE` 0.225, Groq gpt-oss-20b (the production default), `CLAIM_CHECK=local`,
+`CLAIM_REPAIR=false`. Sample: 20 unanswerable + 15 answerable (5 per type). Same questions, check off vs on.
+
+| | Check off | Check on |
+| --- | --- | --- |
+| Unanswerable questions abstained | 7 / 20 | **12 / 20** |
+| Answerable questions answered | 15 / 15 | 14 / 15 |
+| Latency p50 / p95 | 0.94 s / 1.42 s | 1.37 s / 2.26 s |
+| Model calls per question | 1 | 2 (1 when it abstains) |
+
+- The 5 new abstentions are topics nothing retrieved covers (diffusion models, GANs, BPE, differential
+  privacy, Qdrant internals). Without the check the model answered them anyway, from loosely related
+  arXiv abstracts.
+- The one answerable question it declined (q043, a paraphrase of "how does RAG work?") is a retrieval
+  miss: the RAG paper was not in the top 10, so the check's "insufficient" was right about what it was
+  given; the error is upstream.
+- The 8 "unanswerable" questions still answered were judged `partial` or `sufficient`, and arXiv did
+  return papers on several of them (speculative decoding, model merging, catastrophic forgetting): the
+  dataset marks them unanswerable *from the library*, so some of these answers are legitimate.
+
+**Decision.** Off by default: it doubles model calls on the free tier for a gain that shows only on
+questions outside the library. Recommended with `CLAIM_CHECK=llm` as an "accuracy mode" when quota
+allows. **Limits:** 35 questions, one model, one run.
+
+## 5m. Query expansion on top of the reranker (2026-10-20)
+
+**Source.** *Beyond the Reranker: Do RAG Retrieval Enhancements Help Once a Strong Reranker Is
+Present?* ([arXiv 2606.28367](https://arxiv.org/abs/2606.28367), 2026): with a strong cross-encoder,
+only query expansion and per-source calibration (§5k) still gave reliable gains. §5f measured our
+rewrite modes without the reranker; this measures them with it.
+
+`run_eval.py --rewrite all --retrievers hybrid,hybrid_rerank --rewrite-cache …` (the §5f gpt-oss-120b
+rewrites, cached), 110 answerable questions, MiniLM, library only.
+
+| Rewrite | Retriever | R@1 | R@5 | MRR | LLM calls/q |
+| --- | --- | --- | --- | --- | --- |
+| off | hybrid | 0.711 | 0.977 | 0.908 | 0 |
+| off | hybrid + reranker (**default**) | 0.783 | 0.991 | 0.950 | 0 |
+| single | hybrid + reranker | 0.783 | 0.995 | 0.962 | 1 |
+| multi | hybrid + reranker | 0.797 | 0.973 | 0.961 | 1 |
+| **decompose** | hybrid + reranker | **0.811** | 0.991 | **0.970** | 1 |
+| selective | hybrid + reranker | 0.783 | 0.982 | 0.952 | 0.38 |
+
+`decompose` stacks with the reranker (R@1 +0.028, MRR +0.020; paraphrase R@1 0.846 → 0.897), consistent
+with the paper. But that is 3 of 110 questions at rank 1, and R@5 — the five passages the model
+actually reads — is unchanged at 0.991. **Decision:** stays off by default (`QUERY_REWRITE=decompose`
+to enable): one model call per question for a ranking gain that rarely changes what the model sees.
+
 ## 6. Known limitations of this dataset
 
 - Unreviewed (see §1) — treat as provisional.
