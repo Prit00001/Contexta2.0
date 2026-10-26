@@ -66,7 +66,11 @@ class Settings(BaseModel):
     min_score: Optional[float] = Field(None, ge=-1.0, le=1.0)  # None -> DEFAULT_MIN_SCORE[backend]
     # P2-07, on by default since the measured run (EVALUATION_REPORT 5d.2/5f): R@1 0.711 -> 0.783 for
     # +0.4 s and +~120 MB peak RAM (411 MB measured with both models). RERANK_MODEL=none turns it off.
-    rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    # L-12 over L-6 measured on the decoy-adversarial eval (eval/run_eval.py --rewrite off
+    # --retrievers hybrid_rerank --decoys): R@1 0.241 -> 0.286, nDCG@10 0.596 -> 0.620, decoy-win
+    # rate 0.75 -> 0.71, for +41 MB. Swapping the embedding model instead (same rerank) moved
+    # nothing - the cross-encoder re-scores everything, so it dominates the final ranking.
+    rerank_model: str = "Xenova/ms-marco-MiniLM-L-12-v2"
     rerank_candidates: int = Field(20, ge=2, le=100)
     # Measured on the arXiv-mixed default path (EVALUATION_REPORT 5g): scoring only the first 500 chars of a
     # passage keeps R@1 and cuts rerank p95 ~1.24 s -> ~0.5 s (library passages are all shorter than 500).
