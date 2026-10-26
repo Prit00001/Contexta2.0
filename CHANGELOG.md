@@ -2,6 +2,58 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Larger default reranker (2026-10-26)
+
+### Changed
+- `RERANK_MODEL` default: `Xenova/ms-marco-MiniLM-L-6-v2` → `Xenova/ms-marco-MiniLM-L-12-v2`. Measured on the decoy-adversarial eval (`eval/run_eval.py --rewrite off --retrievers hybrid_rerank --decoys`): R@1 0.241 → 0.286, nDCG@10 0.596 → 0.620, decoy-win rate 0.75 → 0.71, for +41 MB. Swapping the embedding model instead (same reranker) moved nothing.
+
+## [Unreleased] — SEO checklist gaps (2026-10-20)
+
+### Added
+- Link-preview image (`/static/og.png`, 1200×630, drawn by `scripts/make_og_image.py`) on `/` and `/about`: `og:image` with size and alt text, `twitter:card` = `summary_large_image`.
+- A real 404 page (status 404, `noindex`) for unknown addresses opened in a browser; API clients and deliberate endpoint 404s keep their JSON errors.
+- Permanent (301) redirects: trailing slash (`/about/` → `/about`) and `www.` ↔ the host in `APP_SITE_URL`. GET/HEAD only.
+
+### Fixed
+- Workspace pages no longer carry a canonical link to `/` (it contradicted their `noindex`) and get the title "Workspace · Contexta" from the server.
+
+## [Unreleased] — Vercel deployment (2026-10-20)
+
+### Added
+- `vercel.json`: FastAPI preset, installs the pinned `requirements.txt`, builds the React app and applies migrations at build time, 300 s functions, tests/docs/`node_modules` left out of the bundle, and a daily cron. `.vercelignore`, `[tool.vercel] entrypoint`. Guide: [VERCEL.md](docs/operations/VERCEL.md).
+- `INGEST_INLINE` (default on Vercel): an upload is ingested inside its own request and returns `ready`.
+- `GET /cron/maintenance` (enabled by `CRON_SECRET`): deletes expired conversations and ingests anything queued.
+- On Vercel: storage dir in `/tmp` and a 4 MB upload limit by default.
+
+## [Unreleased] — Search and AI answer engine visibility (2026-10-20)
+
+### Added
+- `/about`: server-rendered page with what Contexta is, how it works, pricing, the 25 library papers and an FAQ, with `WebApplication` and `FAQPage` structured data (JSON-LD). Most AI crawlers don't run JavaScript, so this is what they can read and quote.
+- `/robots.txt` (private pages and `?q=` answer links excluded), `/sitemap.xml`, `/llms.txt` (a Markdown map of the site for language models). All use `APP_SITE_URL`, else the forwarded host.
+- The app shell has a real title, description, canonical and Open Graph tags, structured data, and readable content before JavaScript loads. Workspace pages send `X-Robots-Tag: noindex`.
+- `/?q=…` links open the search page and ask that question; asking a new question updates the link so it can be shared. Per-page titles, an About link in the nav, and HEAD support on public pages.
+- GO_LIVE.md §5: after-deploy steps (Search Console, Bing Webmaster Tools, rich results check, keeping the free instance awake, getting mentioned, measuring).
+
+## [Unreleased] — Go live: sign-up and Render setup (2026-10-20)
+
+### Added
+- Sign-up, email confirmation and password reset on `/workspace` (Supabase Auth): "Create an account", "Forgot password?", and a "Choose a new password" step after a reset link. Email links sign the user in and are removed from the URL; expired links say so.
+- Tokens from Supabase's newer JWT signing keys (ES256/RS256) are verified against the project's JWKS; HS256 with `SUPABASE_JWT_SECRET` still works.
+- `INGEST_IN_API=true`: ingestion runs inside the API process (Render's free plan has no background workers). The worker now reconnects when the database drops its connection.
+- `MIGRATE_ON_START=true` (Docker): applies pending migrations before the server starts.
+- `render.yaml` declares every setting for workspaces and billing; [GO_LIVE.md](docs/operations/GO_LIVE.md) walks through Supabase, Razorpay and Render, then a test-payment checklist.
+
+### Fixed
+- Adding a member by email asked Supabase's admin API for `?email=`, which it ignores, and took the first user returned: on a real Supabase project that could add the wrong person. It now uses the `filter` parameter and requires an exact email match.
+
+## [Unreleased] — Workspace billing (2026-10-19)
+
+### Added
+- Billing for workspaces ([ADR-007](docs/decisions/ADR-007-billing.md)), off unless `BILLING_ENABLED=true`: one hour of active use free per workspace (idle time never counts), then a per-seat monthly Razorpay subscription. After the trial, asking and uploading return 402; everything stays readable; paper search stays free.
+- `GET /workspaces/{id}/billing`, `POST /workspaces/{id}/activity` (trial heartbeat), `POST .../billing/subscribe`, `.../billing/verify` (Checkout signature), `.../billing/cancel`, and the signed Razorpay webhook `POST /billing/razorpay/webhook`. Member changes update the seat count from the next renewal.
+- Frontend: a trial banner with minutes left, a Billing page with Razorpay Checkout, and paywall messages on ask and upload.
+- Migration `0004_billing.sql`.
+
 ## [Unreleased] — React frontend (P2-12) (2026-10-19)
 
 ### Added

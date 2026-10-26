@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { AnswerFields, ConversationDetail, Turn, WorkspaceAskResponse, WorkspaceSource } from "../../api/types";
+import { ApiError } from "../../api/client";
 import { useAuth } from "../../auth";
 import { AnswerView, Skeleton, type SourceView } from "../../components/Answer";
 import { useWorkspace } from "./WorkspaceLayout";
@@ -27,7 +28,7 @@ const outcomeNote = (a: AnswerFields) =>
 
 export function AskView() {
   const { convId } = useParams();
-  const { ws, base, reloadConversations, retentionDays } = useWorkspace();
+  const { ws, base, reloadConversations, retentionDays, refreshBilling } = useWorkspace();
   const { authFetch } = useAuth();
   const navigate = useNavigate();
   const [turns, setTurns] = useState<ThreadTurn[]>([]);
@@ -96,6 +97,7 @@ export function AskView() {
     } catch (err) {
       setTurns((t) => t.map((turn, i) => (i === index ? { question: q, error: (err as Error).message } : turn)));
       setQuestion(q);
+      if ((err as ApiError).status === 402) void refreshBilling(); // trial just ran out: show the banner
     } finally {
       setBusy(false);
     }

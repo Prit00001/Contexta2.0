@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "fastapi",
+  "installCommand": "if command -v uv >/dev/null 2>&1; then uv pip install -r requirements.txt; else python -m ensurepip -q && python -m pip install -q --disable-pip-version-check -r requirements.txt; fi",
+  "buildCommand": "cd frontend && corepack enable && pnpm install --frozen-lockfile && pnpm build && cd .. && if [ -n \"$DATABASE_URL\" ]; then python scripts/migrate.py; fi",
+  "functions": {
+    "app/main.py": {
+      "maxDuration": 300,
+      "excludeFiles": "{frontend/node_modules/**,frontend/src/**,tests/**,docs/**,eval/**,demo-out/**,db/**,.storage/**,.cache/**,.model_cache/**,**/__pycache__/**,**/*.md}"
+    }
+  },
+  "crons": [{ "path": "/cron/maintenance", "schedule": "17 3 * * *" }]
+}

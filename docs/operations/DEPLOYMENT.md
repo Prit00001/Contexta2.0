@@ -7,6 +7,7 @@
 | Local process | `uvicorn app.main:app` | Verified |
 | Docker image | `Dockerfile` (Python 3.11-slim, lockfile install, model baked in) | Defined; **build not executed** in the Phase 1 environment (Docker Hub blocked). CI builds and smoke-tests it |
 | Docker Compose | `docker-compose.yml` — api, worker, one-shot migrate, Postgres/pgvector | Syntax validated (`docker compose config`); not run |
+| Vercel | `vercel.json` (FastAPI preset, frontend build, migrations, daily cron) | Install + build commands and a read-only start verified locally; see [VERCEL.md](VERCEL.md) |
 | Render (free) | `render.yaml` blueprint, Docker runtime, health check `/health` | Unchanged from baseline; not re-deployed in Phase 1 |
 | Hugging Face Spaces | Docker SDK, `app_port: 8000` in the Space README | Unchanged from baseline |
 
@@ -23,6 +24,8 @@ python scripts/smoke_test.py --base-url http://127.0.0.1:8000          # add --e
 Inputs that determine the build: the git commit, `requirements.txt` (exact pins), and the base image tag `python:3.11-slim`. For byte-for-byte reproducibility pin the base image by digest (`FROM python:3.11-slim@sha256:...`) in your release branch.
 
 ### Render
+
+Full product (workspaces, sign-up, billing): follow [GO_LIVE.md](GO_LIVE.md). Paper search only:
 
 1. Push the repository to GitHub; Render → New → Blueprint (reads `render.yaml`).
 2. Set provider keys as secret env vars in the dashboard; optionally `REQUIRE_LLM=true`, `LOG_FORMAT=json`.

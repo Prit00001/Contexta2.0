@@ -101,7 +101,20 @@ def test_reranker_on_by_default_and_can_be_turned_off(monkeypatch):
     from app.config import load_settings
 
     monkeypatch.delenv("RERANK_MODEL", raising=False)
-    assert load_settings().rerank_model == "Xenova/ms-marco-MiniLM-L-6-v2"
+    assert load_settings().rerank_model == "Xenova/ms-marco-MiniLM-L-12-v2"
     for off in ("none", "OFF", "false"):
         monkeypatch.setenv("RERANK_MODEL", off)
         assert load_settings().rerank_model == ""
+
+
+def test_vercel_defaults_fit_its_limits_and_can_be_overridden(monkeypatch):
+    monkeypatch.setenv("VERCEL", "1")
+    s = load_settings()
+    assert str(s.cache_dir).startswith("/tmp") and str(s.storage_dir).startswith("/tmp")
+    assert s.max_upload_mb == 4 and s.ingest_inline is True  # 4.5 MB bodies; nothing runs between requests
+    monkeypatch.setenv("INGEST_INLINE", "false")
+    monkeypatch.setenv("MAX_UPLOAD_MB", "3")
+    s = load_settings()
+    assert s.ingest_inline is False and s.max_upload_mb == 3
+    monkeypatch.delenv("VERCEL")
+    assert load_settings().ingest_inline is False

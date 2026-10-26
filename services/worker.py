@@ -1,14 +1,19 @@
 """Background ingestion worker: polls the jobs table and runs the pipeline. Runs as
-its own process (python -m services.worker), separate from the FastAPI request path.
+its own process (python -m services.worker), separate from the FastAPI request path - or, with
+INGEST_IN_API=true, as a thread inside the API process (single-service hosts such as Render's
+free tier, which has no background workers).
 
-ponytail: single long-lived connection, reconnect-on-drop is not handled. Upgrade
-path: wrap the loop body in a retry on psycopg2.OperationalError if idle connections
-get dropped by the DB (e.g. Supabase's pooler) in practice.
+One long-lived connection; if the database drops it (e.g. Supabase's pooler closing an idle
+connection) the loop reconnects after a short pause.
 """
 from __future__ import annotations
 
 import logging
+import threading
 import time
+from typing import Optional
+
+import psycopg2
 
 from app.config import get_settings
 from core import conversations, db
@@ -43,17 +48,53 @@ def purge_history(conn, settings) -> int:
     return n
 
 
-def run_forever(poll_interval: float = 2.0) -> None:
+RECONNECT_DELAY_S = 5.0
+
+
+def drain(conn, settings, max_jobs: int = 5) -> int:
+    """Process up to ``max_jobs`` queued jobs now, in the caller's thread. Used where no worker runs
+    between requests (INGEST_INLINE, e.g. Vercel): an upload ingests its own file before responding."""
+    done = 0
+    while done < max_jobs and run_once(conn, settings):
+        done += 1
+    return done
+
+
+def run_forever(poll_interval: float = 2.0, stop: Optional[threading.Event] = None) -> None:
+    """Poll for jobs until ``stop`` is set (never, when run as its own process)."""
     settings = get_settings()
-    conn = db.get_conn(settings.database_url)
+    stop = stop or threading.Event()
+    conn = None
     log.info("Worker ready, polling every %.1fs", poll_interval)
     next_purge = 0.0
-    while True:
-        if time.monotonic() >= next_purge:
-            purge_history(conn, settings)
-            next_purge = time.monotonic() + PURGE_INTERVAL_S
-        if not run_once(conn, settings):
-            time.sleep(poll_interval)
+    while not stop.is_set():
+        try:
+            if conn is None:
+                conn = db.get_conn(settings.database_url)
+            if time.monotonic() >= next_purge:
+                purge_history(conn, settings)
+                next_purge = time.monotonic() + PURGE_INTERVAL_S
+            if not run_once(conn, settings):
+                stop.wait(poll_interval)
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
+            log.warning("Worker lost its database connection (%s); reconnecting", type(exc).__name__)
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001 - it is already broken
+                    pass
+            conn = None
+            stop.wait(RECONNECT_DELAY_S)
+    if conn is not None:
+        conn.close()
+
+
+def start_in_thread(poll_interval: float = 2.0) -> tuple[threading.Thread, threading.Event]:
+    """Run the worker inside the current (API) process. Set the returned event to stop it."""
+    stop = threading.Event()
+    t = threading.Thread(target=run_forever, args=(poll_interval, stop), name="ingest-worker", daemon=True)
+    t.start()
+    return t, stop
 
 
 if __name__ == "__main__":

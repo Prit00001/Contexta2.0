@@ -160,3 +160,18 @@ export interface ApiKey {
   last_used_at: string | null;
   revoked_at: string | null;
 }
+
+// ---- billing (ADR-007) ----
+
+export interface Billing {
+  enabled: boolean;
+  plan: "unlimited" | "trial" | "active" | "past_due" | "expired";
+  trial_seconds_left: number;
+  trial_seconds_total: number;
+  seats: number;
+  seats_billed: number | null;
+  subscription_status: string | null;
+  current_end: string | null;
+  price_label: string;
+  can_manage: boolean;
+}

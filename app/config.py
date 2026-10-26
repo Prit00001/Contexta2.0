@@ -66,7 +66,11 @@ class Settings(BaseModel):
     min_score: Optional[float] = Field(None, ge=-1.0, le=1.0)  # None -> DEFAULT_MIN_SCORE[backend]
     # P2-07, on by default since the measured run (EVALUATION_REPORT 5d.2/5f): R@1 0.711 -> 0.783 for
     # +0.4 s and +~120 MB peak RAM (411 MB measured with both models). RERANK_MODEL=none turns it off.
-    rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    # L-12 over L-6 measured on the decoy-adversarial eval (eval/run_eval.py --rewrite off
+    # --retrievers hybrid_rerank --decoys): R@1 0.241 -> 0.286, nDCG@10 0.596 -> 0.620, decoy-win
+    # rate 0.75 -> 0.71, for +41 MB. Swapping the embedding model instead (same rerank) moved
+    # nothing - the cross-encoder re-scores everything, so it dominates the final ranking.
+    rerank_model: str = "Xenova/ms-marco-MiniLM-L-12-v2"
     rerank_candidates: int = Field(20, ge=2, le=100)
     # Measured on the arXiv-mixed default path (EVALUATION_REPORT 5g): scoring only the first 500 chars of a
     # passage keeps R@1 and cuts rerank p95 ~1.24 s -> ~0.5 s (library passages are all shorter than 500).
@@ -134,6 +138,25 @@ class Settings(BaseModel):
     workspace_rate_limit_per_min: int = Field(60, ge=0)
     # Stored workspace conversations (P2-14, ADR-006): deleted this many days after the last turn
     history_retention_days: int = Field(30, ge=1, le=3650)
+    # Run the ingestion worker as a thread inside the API process instead of a separate
+    # `python -m services.worker` (for hosts with one service only, e.g. Render's free tier).
+    ingest_in_api: bool = False
+    # Ingest an upload inside its own request, before responding (serverless hosts such as Vercel,
+    # where nothing runs between requests). Defaults to true on Vercel.
+    ingest_inline: bool = False
+    # Shared secret for GET /cron/maintenance (Vercel Cron sends it as "Authorization: Bearer ...").
+    cron_secret: str = Field("", repr=False)
+
+    # Billing (ADR-007): a free trial of active use per workspace, then a per-seat Razorpay subscription.
+    # Off by default: without it nothing is ever paywalled (self-hosting, development).
+    billing_enabled: bool = False
+    billing_trial_minutes: int = Field(60, ge=0, le=100000)
+    billing_total_count: int = Field(120, ge=1, le=1200)  # monthly charges before the subscription ends
+    billing_price_label: str = ""  # shown in the UI, e.g. "₹499 per seat / month"; the price itself is the plan's
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = Field("", repr=False)
+    razorpay_webhook_secret: str = Field("", repr=False)
+    razorpay_plan_id: str = ""
 
     def min_score_for(self, backend: str) -> float:
         """MIN_SCORE if set explicitly, else the calibrated default for the backend actually in use
@@ -151,6 +174,13 @@ class Settings(BaseModel):
             raise ValueError(f"unknown provider(s) {unknown}; expected any of {list(KNOWN_PROVIDERS)}")
         if self.storage_backend == "supabase" and not (self.supabase_url and self.supabase_service_key):
             raise ValueError("STORAGE_BACKEND=supabase requires SUPABASE_URL and SUPABASE_SERVICE_KEY")
+        if self.billing_enabled and not all(
+            (self.razorpay_key_id, self.razorpay_key_secret, self.razorpay_webhook_secret, self.razorpay_plan_id)
+        ):
+            raise ValueError(
+                "BILLING_ENABLED=true requires RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, "
+                "RAZORPAY_WEBHOOK_SECRET and RAZORPAY_PLAN_ID"
+            )
         if self.require_llm and not self.providers:
             raise ValueError(
                 "REQUIRE_LLM=true but no LLM provider is configured "
@@ -223,8 +253,12 @@ def load_settings() -> Settings:
         value = _env(_ENV_NAMES.get(name, name.upper()))
         if value is not None:
             raw[name] = value
-    if "cache_dir" not in raw and os.getenv("VERCEL"):
-        raw["cache_dir"] = "/tmp/contexta-cache"  # Vercel's filesystem is read-only except /tmp
+    if os.getenv("VERCEL"):
+        # Vercel: read-only filesystem except /tmp, 4.5 MB request bodies, nothing runs between requests.
+        raw.setdefault("cache_dir", "/tmp/contexta-cache")
+        raw.setdefault("storage_dir", "/tmp/contexta-storage")  # use STORAGE_BACKEND=supabase: /tmp is per instance
+        raw.setdefault("max_upload_mb", "4")
+        raw.setdefault("ingest_inline", "true")
     if "log_level" in raw:
         raw["log_level"] = str(raw["log_level"]).upper()
     if str(raw.get("rerank_model", "")).lower() in ("none", "off", "false", "0"):

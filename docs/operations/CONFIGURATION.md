@@ -35,8 +35,8 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 | `EMBED_BACKEND` | `fastembed` | `hash` = deterministic token hashing, no download — tests only |
 | `EMBED_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Must be a fastembed-supported model |
 | `FASTEMBED_CACHE_PATH` | fastembed default | Model cache directory (Docker: `/app/.model_cache`, baked in) |
-| `CACHE_DIR` | `.cache` (`/tmp/contexta-cache` on Vercel) | Library embedding cache (`embeddings.npz`) |
-| `RERANK_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` | Cross-encoder reranking (P2-07), **on by default** since measured: R@1 0.711 → 0.783, R@5 0.977 → 0.991 for +0.4 s per search and ~120 MB RAM (411 MB peak with both models). Reorders sources that passed `MIN_SCORE`, never adds any. Baked into the Docker image; unloadable → off, reported by `/ready`. `none` disables |
+| `CACHE_DIR` | `.cache` (`/tmp/contexta-cache` on Vercel; there `STORAGE_DIR` is `/tmp/contexta-storage` and `MAX_UPLOAD_MB` is `4`) | Library embedding cache (`embeddings.npz`) |
+| `RERANK_MODEL` | `Xenova/ms-marco-MiniLM-L-12-v2` | Cross-encoder reranking (P2-07), **on by default** since measured: R@1 0.711 → 0.783, R@5 0.977 → 0.991 for +0.4 s per search and ~120 MB RAM (411 MB peak with both models) with the original L-6 model. Switched to the 12-layer model 2026-10-26: on the decoy-adversarial eval, R@1 0.241 → 0.286, nDCG@10 0.596 → 0.620, decoy-win rate 0.75 → 0.71, for +41 MB on disk (peak RAM not re-measured). Reorders sources that passed `MIN_SCORE`, never adds any. Baked into the Docker image; unloadable → off, reported by `/ready`. `none` disables |
 | `RERANK_CANDIDATES` | `20` | How many retrieved sources the reranker scores before keeping `top_k` |
 | `RERANK_MAX_CHARS` | `500` | Score only the first N characters of each passage when reranking (0 = whole text). Keeps quality, ~2.5× faster on the arXiv path (EVALUATION_REPORT §5g) |
 | `RERANK_LIBRARY_BOOST` | `3` | With reranking on: bonus (cross-encoder logit units) for curated-library sources over live arXiv in the final order. 0 = none; 5 = more library, less arXiv ([ADR-005](../decisions/ADR-005-library-prior.md)) |
@@ -56,7 +56,7 @@ No provider configured → the app still answers (`outcome: extractive_fallback`
 | `TRUST_PROXY_HEADERS` | `true` | Use the right-most `X-Forwarded-For` hop (the one your platform's proxy appends). Set `false` when clients connect directly |
 | `ANSWER_CACHE_TTL` | `3600` | Seconds; only LLM answers (and empty results) are cached. In Redis (shared) when `REDIS_URL` is set, else per process |
 | `ALLOWED_ORIGINS` | `*` | CORS, comma-separated |
-| `APP_SITE_URL` | `http://localhost:8000` | Sent to OpenRouter |
+| `APP_SITE_URL` | `http://localhost:8000` | The public address (no trailing slash): canonical links, Open Graph URLs, `sitemap.xml`, `robots.txt` and `llms.txt` use it, and it is sent to OpenRouter. Left at a localhost value, those pages use the request's forwarded host instead |
 | `MAX_PDF_MB` | `4` | `/ask-pdf` upload limit (Vercel rejects bodies > ~4.5 MB) |
 | `MAX_PDF_CHUNKS` | `300` | Longer PDFs are truncated with a warning |
 
@@ -78,15 +78,26 @@ Traced (`TRACING_ENABLED=true`): FastAPI's own server span (method, route, `url.
 | Variable | Default | Notes |
 |---|---|---|
 | `DATABASE_URL` | – | Postgres with pgvector. Unset → workspace routes return 503. Unreachable at startup → public API still starts, `/ready` shows `database: unreachable` |
-| `SUPABASE_JWT_SECRET` | – | Required for workspace auth; unset → workspace JWT routes return 503 |
+| `SUPABASE_JWT_SECRET` | – | Verifies HS256 user tokens (Supabase projects on the legacy JWT secret); unset → such tokens get 503. Projects on the newer JWT signing keys issue ES256/RS256 tokens, verified against `SUPABASE_URL/auth/v1/.well-known/jwks.json` (public keys cached 10 min) and need only `SUPABASE_URL` |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | – | Member lookup; Supabase storage |
-| `SUPABASE_ANON_KEY` | – | Supabase's public client key. With `SUPABASE_URL`, the `/workspace` page signs users in with email + password; without it, the page asks for a pasted access token (local/dev). Served by `GET /auth/config` (public by design; the service key and JWT secret never are) |
+| `SUPABASE_ANON_KEY` | – | Supabase's public client key. With `SUPABASE_URL`, the `/workspace` page offers email + password sign-in, sign-up and password reset (email links return to `/workspace`: add it to the project's Redirect URLs); without it, the page asks for a pasted access token (local/dev). Served by `GET /auth/config` (public by design; the service key and JWT secret never are) |
 | `STORAGE_BACKEND` | `local` | `local` or `supabase` (requires the two above) |
 | `STORAGE_DIR` | `.storage` | Local backend root |
 | `STORAGE_BUCKET` | `documents` | Supabase bucket |
 | `MAX_UPLOAD_MB` | `20` | Workspace uploads |
 | `REDIS_URL` | – | Shared answer cache, `/ask` and workspace rate limits across instances; falls back to in-memory if unset or unreachable |
 | `WORKSPACE_RATE_LIMIT_PER_MIN` | `60` | |
+| `BILLING_ENABLED` | `false` | Workspace billing ([ADR-007](../decisions/ADR-007-billing.md)): a free trial of active use per workspace, then a per-seat Razorpay subscription; asking and uploading return 402 after the trial. Off = unlimited. Needs migration `0004_billing.sql` |
+| `BILLING_TRIAL_MINUTES` | `60` | Minutes of active use free per workspace (idle time never counts) |
+| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` | – | Razorpay API keys (Dashboard → Account & Settings → API Keys). Required when billing is on; the secret is never logged |
+| `RAZORPAY_PLAN_ID` | – | The monthly per-seat plan (Dashboard → Subscriptions → Plans); its amount is the price per seat |
+| `RAZORPAY_WEBHOOK_SECRET` | – | Secret of the webhook pointed at `https://<your-app>/billing/razorpay/webhook` with the subscription events enabled |
+| `BILLING_PRICE_LABEL` | – | Shown on the Billing page, e.g. `₹499 per seat / month` (display only; the plan decides the charge) |
+| `BILLING_TOTAL_COUNT` | `120` | Monthly charges before a subscription ends (Razorpay requires a count) |
+| `INGEST_IN_API` | `false` | Run the ingestion worker as a thread inside the API process (shares its embedding model) instead of a separate `python -m services.worker`. For single-service hosts such as Render's free plan; `render.yaml` sets it |
+| `INGEST_INLINE` | `false` (`true` on Vercel) | Ingest an upload inside its own request, so it returns **ready** (serverless hosts, where nothing runs between requests). See [VERCEL.md](VERCEL.md) |
+| `CRON_SECRET` | – | Enables `GET /cron/maintenance` (delete expired conversations, ingest anything queued) for a scheduler that sends `Authorization: Bearer <secret>`, such as Vercel Cron. Unset → 404 |
+| `MIGRATE_ON_START` | `false` | Docker image only: apply pending `supabase/migrations` (`scripts/migrate.py`) before starting the server, when `DATABASE_URL` is set. A failed migration stops the start. `render.yaml` sets it |
 | `HISTORY_RETENTION_DAYS` | `30` | Stored workspace conversations ([ADR-006](../decisions/ADR-006-conversation-history.md)) are hidden once idle this long and deleted by the worker (`python -m services.worker`, hourly). Only their author can see them; each turn keeps the full source passages, which therefore outlive a deleted document until the thread expires. Apply migration `0003_conversations.sql` (`python scripts/migrate.py`) before upgrading |
 
 ## Safe local setup

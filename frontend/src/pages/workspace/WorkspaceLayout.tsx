@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, NavLink, Navigate, Outlet, useNavigate, useOutletContext, useParams } from "react-router-dom";
-import type { ConversationSummary, Workspace } from "../../api/types";
+import type { Billing, ConversationSummary, Workspace } from "../../api/types";
 import { useAuth } from "../../auth";
+import { TrialBanner, useBilling } from "./billing";
 import { SignIn } from "./SignIn";
 
 export const ROLE_RANK = { viewer: 0, member: 1, admin: 2 } as const;
@@ -12,6 +13,8 @@ export interface WorkspaceCtx {
   conversations: ConversationSummary[] | null;
   reloadConversations(): Promise<void>;
   retentionDays: number;
+  billing: Billing | null;
+  refreshBilling(): Promise<void>;
 }
 
 export const useWorkspace = () => useOutletContext<WorkspaceCtx>();
@@ -27,7 +30,7 @@ const remember = (id?: string) => {
 
 /** Loads the user's workspaces; null while loading. */
 function useWorkspaces() {
-  const { authFetch, session } = useAuth();
+  const { authFetch, session, recovery } = useAuth();
   const [list, setList] = useState<Workspace[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reload = useCallback(async () => {
@@ -39,18 +42,18 @@ function useWorkspaces() {
     }
   }, [authFetch]);
   useEffect(() => {
-    if (session) void reload();
-  }, [session, reload]);
+    if (session && !recovery) void reload(); // after a reset link, only once the new password is set
+  }, [session, recovery, reload]);
   return { list, error, reload };
 }
 
 /** /workspace: sign in, then go to the remembered workspace (or create the first one). */
 export function WorkspaceHome() {
-  const { session, config, configError } = useAuth();
+  const { session, recovery, config, configError } = useAuth();
   const { list, error, reload } = useWorkspaces();
   if (configError) return <p className="err center">{configError}</p>;
   if (!config) return null;
-  if (!session) return <SignIn />;
+  if (!session || recovery) return <SignIn />;
   if (error) return <p className="err center">{error}</p>;
   if (!list) return null;
   if (!list.length) return <CreateWorkspace first onCreated={reload} />;
@@ -60,12 +63,13 @@ export function WorkspaceHome() {
 
 export function WorkspaceLayout() {
   const { wsId } = useParams();
-  const { session, config, authFetch } = useAuth();
+  const { session, recovery, config, authFetch } = useAuth();
   const { list, error, reload } = useWorkspaces();
   const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
   const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
   const ws = list?.find((w) => w.workspace_id === wsId);
+  const { billing, refresh: refreshBilling } = useBilling(ws?.workspace_id);
 
   const reloadConversations = useCallback(async () => {
     if (!wsId) return;
@@ -85,7 +89,7 @@ export function WorkspaceLayout() {
   }, [ws, reloadConversations]);
 
   if (!config) return null;
-  if (!session) return <SignIn />;
+  if (!session || recovery) return <SignIn />;
   if (error) return <p className="err center">{error}</p>;
   if (!list) return null;
   if (!ws) return <p className="empty">This workspace doesn't exist or you're not a member. <Link to="/workspace">Your workspaces</Link></p>;
@@ -98,6 +102,8 @@ export function WorkspaceLayout() {
     conversations,
     reloadConversations,
     retentionDays: config.history_retention_days,
+    billing,
+    refreshBilling,
   };
 
   return (
@@ -137,6 +143,11 @@ export function WorkspaceLayout() {
               <NavLink to="keys" className={tab}>
                 API keys
               </NavLink>
+              {billing?.enabled && (
+                <NavLink to="billing" className={tab}>
+                  Billing
+                </NavLink>
+              )}
             </>
           )}
         </nav>
@@ -146,6 +157,7 @@ export function WorkspaceLayout() {
         </p>
       </aside>
       <main>
+        <TrialBanner billing={billing} wsId={ws.workspace_id} />
         <Outlet context={ctx} />
       </main>
       {creating && (

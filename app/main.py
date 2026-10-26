@@ -5,16 +5,20 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
 from app.observability import RequestContextMiddleware, configure_logging
 from app.routes import router
 from app.routes_admin import router as admin_router
+from app.routes_billing import router as billing_router
 from app.routes_workspace import router as workspace_router
+from app.seo import PermanentRedirects, not_found_handler, render_shell
+from app.seo import router as seo_router
 from core import db, tracing
 from core.cache import make_answer_cache
 from core.embeddings import Embedder
@@ -23,8 +27,10 @@ from core.rate_limit import make_limiter, make_redis
 from core.reranker import Reranker
 from core.retriever import Retriever
 from data.documents import DOCUMENTS
+from services import ingestion
 from services.arxiv_client import ArxivClient
 from services.search_service import SearchService
+from services.worker import start_in_thread
 
 STATIC = Path(__file__).parent / "static"
 # The React app (frontend/, `pnpm build`). When it isn't built - e.g. a Python-only dev setup - the
@@ -49,6 +55,7 @@ async def lifespan(app: FastAPI):
     generator = Generator(s.providers, client, s.llm_timeout)
     arxiv = ArxivClient(client, s.arxiv_max_results, s.arxiv_cache_ttl)
     app.state.settings = s
+    app.state.http = client  # shared outbound client (Razorpay, ...); tests swap its transport
     app.state.embedder, app.state.retriever, app.state.generator = embedder, retriever, generator
     redis = make_redis(s.redis_url)  # shared answer cache + rate limits across instances (P2-FR-07)
     app.state.redis = redis
@@ -74,17 +81,28 @@ async def lifespan(app: FastAPI):
                 extra={"event": "startup.db", "status": "error", "category": "internal"},
             )
     app.state.workspace_limiter = make_limiter(redis, s.workspace_rate_limit_per_min)
+    worker = None
+    if app.state.db_pool and (s.ingest_in_api or s.ingest_inline):
+        ingestion._embedder = embedder  # share the loaded model instead of loading a second copy
+    if app.state.db_pool and s.ingest_in_api:
+        worker = start_in_thread()
     log.info(
         "Ready: %d docs, embeddings=%s%s, LLM providers=%s, db=%s, cache=%s",
         retriever.size,
         embedder.backend,
         " (FALLBACK)" if embedder.degraded else "",
         generator.provider_names or "none (extractive mode)",
-        "connected" if app.state.db_pool else ("UNREACHABLE" if s.database_url else "not configured"),
+        ("connected" + (" + ingest worker" if worker else ""))
+        if app.state.db_pool
+        else ("UNREACHABLE" if s.database_url else "not configured"),
         "redis" if redis is not None else "memory",
         extra={"event": "startup", "status": "degraded" if embedder.degraded else "ok"},
     )
     yield
+    if worker:
+        thread, stop = worker
+        stop.set()
+        thread.join(timeout=10)
     tracing.shutdown_tracing()
     await client.aclose()
     if redis is not None:
@@ -113,22 +131,26 @@ def create_app(http_transport: httpx.AsyncBaseTransport | None = None) -> FastAP
         allow_headers=["*"],
         expose_headers=["X-Request-ID"],
     )
+    app.add_middleware(PermanentRedirects, site_url=get_settings().site_url)  # /about/ -> /about, www <-> apex
     app.add_middleware(RequestContextMiddleware)  # outermost: sees every response, incl. CORS and 500s
     app.state.http_transport = http_transport
     app.include_router(router)
     app.include_router(admin_router)
     app.include_router(workspace_router)
+    app.include_router(billing_router)
+    app.include_router(seo_router)
+    app.add_exception_handler(StarletteHTTPException, not_found_handler)  # browsers get a 404 page
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     if (FRONTEND_DIST / "index.html").exists():
         app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
         spa = FRONTEND_DIST / "index.html"
 
-        @app.get("/", include_in_schema=False)
-        @app.get("/workspace", include_in_schema=False)
-        @app.get("/workspace/{_path:path}", include_in_schema=False)
-        async def spa_page(_path: str = ""):
-            return FileResponse(spa)  # client-side routing (react-router) takes it from here
+        @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+        @app.api_route("/workspace", methods=["GET", "HEAD"], include_in_schema=False)
+        @app.api_route("/workspace/{_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+        async def spa_page(request: Request, _path: str = ""):
+            return render_shell(request, spa)  # client-side routing (react-router) takes it from here
 
     else:
 

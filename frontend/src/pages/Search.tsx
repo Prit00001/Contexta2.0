@@ -53,6 +53,15 @@ export function Search() {
     return () => abortRef.current?.abort();
   }, []);
 
+  // Shareable links: /?q=… asks that question on load (once - StrictMode mounts effects twice in dev).
+  const asked = useRef(false);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q")?.trim();
+    if (!q || asked.current) return;
+    asked.current = true;
+    void submit(undefined, q.slice(0, 1000));
+  }, []);
+
   const choosePdf = (f: File | null) => {
     if (f) {
       if (!(f.type === "application/pdf" || /\.pdf$/i.test(f.name))) return setView({ kind: "error", message: "Only PDF files are supported." });
@@ -67,6 +76,7 @@ export function Search() {
     const q = (override ?? question).trim();
     if (q.length < 3 || busy) return;
     if (override) setQuestion(override);
+    if (!pdf && history.length === 0) window.history.replaceState(null, "", `/?q=${encodeURIComponent(q)}`); // shareable
     setBusy(true);
     setView({ kind: "loading" });
     abortRef.current?.abort();

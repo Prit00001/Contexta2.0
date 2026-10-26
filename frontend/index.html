@@ -3,11 +3,40 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Contexta</title>
+    <title>Contexta: cited answers to ML and NLP research questions</title>
+    <meta name="description" content="Ask machine learning and NLP research questions and get answers from 25 landmark papers, live arXiv or your own PDF, with every citation checked against its source. Free." />
+    <!-- __SITE_URL__ and __APP_LD__ are filled in by the server (app/seo.py) -->
+    <link rel="canonical" href="__SITE_URL__/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Contexta" />
+    <meta property="og:title" content="Contexta: cited answers to ML and NLP research questions" />
+    <meta property="og:description" content="Answers from 25 landmark papers, live arXiv or your own PDF, with every citation checked against its source." />
+    <meta property="og:url" content="__SITE_URL__/" />
+    <meta property="og:image" content="__SITE_URL__/static/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Contexta: cited answers to ML and NLP research questions" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="__SITE_URL__/static/og.png" />
+    <meta name="theme-color" content="#4f46e5" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='14' cy='14' r='8' fill='none' stroke='%234f46e5' stroke-width='3'/><path d='M20 20l7 7' stroke='%234f46e5' stroke-width='3' stroke-linecap='round'/></svg>" />
+    <script type="application/ld+json">__APP_LD__</script>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Replaced by the React app on load; what crawlers that don't run JavaScript read. -->
+    <div id="root">
+      <main style="max-width: 680px; margin: 48px auto; padding: 0 16px; font-family: system-ui, sans-serif">
+        <h1>Contexta: cited answers to ML and NLP research questions</h1>
+        <p>
+          Ask a machine learning or NLP research question. Contexta answers only from sources it retrieves: a library of 25
+          landmark papers (Transformer, BERT, RAG, LoRA, Chinchilla, FlashAttention and more), live arXiv search, or a PDF you
+          upload. Every citation is checked against the passage it came from, and sentences without a source are marked.
+        </p>
+        <p>Paper search is free. Team workspaces answer questions over your own documents.</p>
+        <p><a href="/about">How Contexta works, pricing and FAQ</a></p>
+        <noscript><p>Contexta needs JavaScript to ask questions.</p></noscript>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
