@@ -72,6 +72,12 @@ jobs:
           python scripts/migrate.py
       # No API keys: the default suite never calls paid providers (all outbound HTTP is mocked).
       - run: pytest -q
+      # Retrieval-only eval (no LLM calls, no cost) - catches silent recall/MRR regressions.
+      # Informational only: the question set isn't human-reviewed yet, so no hard threshold here.
+      - name: Retrieval regression check (eval/run_eval.py)
+        if: matrix.python-version == '3.13'
+        continue-on-error: true
+        run: python eval/run_eval.py --limit 40
 
   docker:
     runs-on: ubuntu-latest
