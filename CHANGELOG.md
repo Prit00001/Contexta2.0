@@ -2,6 +2,11 @@
 
 All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — Larger default reranker (2026-10-26)
+
+### Changed
+- `RERANK_MODEL` default: `Xenova/ms-marco-MiniLM-L-6-v2` → `Xenova/ms-marco-MiniLM-L-12-v2`. Measured on the decoy-adversarial eval (`eval/run_eval.py --rewrite off --retrievers hybrid_rerank --decoys`): R@1 0.241 → 0.286, nDCG@10 0.596 → 0.620, decoy-win rate 0.75 → 0.71, for +41 MB. Swapping the embedding model instead (same reranker) moved nothing.
+
 ## [Unreleased] — SEO checklist gaps (2026-10-20)
 
 ### Added
