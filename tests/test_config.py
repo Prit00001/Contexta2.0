@@ -101,7 +101,7 @@ def test_reranker_on_by_default_and_can_be_turned_off(monkeypatch):
     from app.config import load_settings
 
     monkeypatch.delenv("RERANK_MODEL", raising=False)
-    assert load_settings().rerank_model == "Xenova/ms-marco-MiniLM-L-6-v2"
+    assert load_settings().rerank_model == "Xenova/ms-marco-MiniLM-L-12-v2"
     for off in ("none", "OFF", "false"):
         monkeypatch.setenv("RERANK_MODEL", off)
         assert load_settings().rerank_model == ""
