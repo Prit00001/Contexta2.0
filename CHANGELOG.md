@@ -5,7 +5,7 @@ All notable changes to Contexta 2.0. Format based on [Keep a Changelog](https://
 ## [Unreleased] — Larger default reranker (2026-10-26)
 
 ### Changed
-- `RERANK_MODEL` default: `Xenova/ms-marco-MiniLM-L-6-v2` → `Xenova/ms-marco-MiniLM-L-12-v2`. Measured on the decoy-adversarial eval (`eval/run_eval.py --rewrite off --retrievers hybrid_rerank --decoys`): R@1 0.241 → 0.286, nDCG@10 0.596 → 0.620, decoy-win rate 0.75 → 0.71, for +41 MB. Swapping the embedding model instead (same reranker) moved nothing.
+- `RERANK_MODEL` default: `Xenova/ms-marco-MiniLM-L-6-v2` → `Xenova/ms-marco-MiniLM-L-12-v2`. Measured on the decoy-adversarial eval (`eval/run_eval.py --rewrite off --retrievers hybrid_rerank --decoys`): R@1 0.241 → 0.286, nDCG@10 0.596 → 0.620, decoy-win rate 0.75 → 0.71. Swapping the embedding model instead (same reranker) moved nothing. Cost of the swap itself, measured on the same machine (20 candidates → top 5): rerank latency 126.6 ms → 231.2 ms (+82.6%), peak RSS with embedder+reranker both loaded 309 MB → 334 MB (+25 MB, smaller than the +41 MB on-disk model size suggested) - not Render's free-tier CPU, so the relative ~1.8× latency increase is the number to trust, not the absolute ms.
 
 ## [Unreleased] — SEO checklist gaps (2026-10-20)
 
